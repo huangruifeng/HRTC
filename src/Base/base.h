@@ -1,6 +1,6 @@
 #pragma once
 
-
+#define LOG_DEBUG(t,x)
 #define LOG_ERROR(t,x)
 #define LOG_INFO(t,x)
 #define LOG_WARNING(t,x)
@@ -38,3 +38,8 @@
         return;                                    \
     }
 
+
+template <typename T, size_t N>
+char (&ArraySizeHelper(T (&array)[N]))[N];
+
+#define arraysize(array) (sizeof(ArraySizeHelper(array)))

@@ -8,7 +8,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 add_subdirectory(src)
-
+add_subdirectory(demo)
 
 # cmake statistics
 message("----------------------------------------------------------")

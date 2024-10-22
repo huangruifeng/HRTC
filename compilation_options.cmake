@@ -75,8 +75,7 @@ if(APPLE OR ANDROID)
     set(IGNORE_WARNINGS "${IGNORE_WARNINGS} -Wno-unused-lambda-capture -Wno-implicit-const-int-float-conversion -Wno-gnu-zero-variadic-macro-arguments")
                           
     #todo(hrf): 修复音频模块中的精度丢失问题，然后移除-Wno-shorten-64-to-32 
-    #todo(ojj): LOG_SEVERITY_PRECONDITION 有隐患--> -Wbitwise-conditional-parentheses
-    set(IGNORE_WARNINGS " ${IGNORE_WARNINGS} -Wno-shorten-64-to-32 -Wno-bitwise-conditional-parentheses")
+    set(IGNORE_WARNINGS " ${IGNORE_WARNINGS} -Wno-shorten-64-to-32")
 
     set(CMAKE_CXX_FLAGS " -Wall ${IGNORE_WARNINGS} -pedantic -Werror ${CMAKE_CXX_FLAGS} ")
 
