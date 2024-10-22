@@ -47,7 +47,7 @@ int32_t DeviceInfoImpl::GetCapability(const char* deviceUniqueIdUTF8,
                                       VideoCaptureCapability& capability) {
   std::lock_guard<std::mutex> lock(_apiLock);
 
-  if(std::string(_lastUsedDeviceName, _lastUsedDeviceNameLength) == deviceUniqueIdUTF8){
+  if(std::string(_lastUsedDeviceName, _lastUsedDeviceNameLength) != deviceUniqueIdUTF8){
     if (-1 == CreateCapabilityMap(deviceUniqueIdUTF8)) {
       return -1;
     }
@@ -73,7 +73,7 @@ int32_t DeviceInfoImpl::GetBestMatchedCapability(
     return -1;
 
   std::lock_guard<std::mutex> lock(_apiLock);
-  if(std::string(_lastUsedDeviceName, _lastUsedDeviceNameLength) == deviceUniqueIdUTF8) {
+  if(std::string(_lastUsedDeviceName, _lastUsedDeviceNameLength) != deviceUniqueIdUTF8) {
     if (-1 == CreateCapabilityMap(deviceUniqueIdUTF8)) {
       return -1;
     }
