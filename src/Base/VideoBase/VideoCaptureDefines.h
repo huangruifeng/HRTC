@@ -21,7 +21,7 @@ enum { kVideoCaptureDeviceNameLength = 256 };  // Max capture device name lenght
 enum { kVideoCaptureProductIdLength = 128 };   // Max product id length
 
 enum class VideoType {
-  kUnknown,
+  kUnknown = 0,
   kI420,
   kIYUV,
   kRGB24,
