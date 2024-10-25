@@ -2,10 +2,11 @@ cmake_minimum_required(VERSION 3.6)
 project(HRTC)
 
 include(compilation_options.cmake)
-
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
-
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+#add 3rd
+include(3rd/3rd.cmake)
 
 add_subdirectory(src)
 add_subdirectory(demo)

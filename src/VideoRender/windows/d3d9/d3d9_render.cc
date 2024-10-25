@@ -1,6 +1,7 @@
 #include "VideoRender/windows/d3d9/d3d9_render.h"
 #include "d3d9_render.h"
 #include "Base/ErrorCode.h"
+#include <libyuv/convert.h>
 using namespace hrtc;
 
 hrtc::D3D9Renderer::D3D9Renderer(size_t width, size_t height):
@@ -62,7 +63,7 @@ bool hrtc::D3D9Renderer::Init(void * window)
             if(SUCCEEDED(hr)){
                 d3d_device_ = d3dDevice;
                 d3dDevice->Release();
-                break;
+                return true;
             }
 
             if(retryCount == 2){
@@ -70,7 +71,10 @@ bool hrtc::D3D9Renderer::Init(void * window)
             }
             retryCount++;
         }while(true);
+        return false;
     });
+
+    return true;
 }
 
 
@@ -127,57 +131,81 @@ int hrtc::D3D9Renderer::RenderFrame(const IMediaInfo & frame)
             surfaceHeight_ = frameHeight;
             surfaceWidth_ = frameWidth;
         }
+    }
 
-        auto tmpSurface = surface_;
-        if(tmpSurface){
-            if(!RenderYUVSurface(frame,tmpSurface.get(),frameWidth,frameHeight)){
-                return HRTC_CODE_ERROR_FAILURE;//todo log.
-            }
+    auto tmpSurface = surface_;
+    if(tmpSurface){
+        if(!RenderYUVSurface(frame,tmpSurface.get(),frameWidth,frameHeight)){
+            return HRTC_CODE_ERROR_FAILURE;//todo log.
         }
-        IDirect3DSurface9* backBuffer;
-        d3d_device_->BeginScene();
-        if(FAILED(d3d_device_->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&backBuffer))){
-            return HRTC_CODE_ERROR_FAILURE;
-        }
-        RECT viewRect; 
-        RECT outRect;
-        HRESULT hr = S_OK;
-        if(GetClientRect(hwnd_,&viewRect)){
-            float w1 = viewRect.right - viewRect.left;
-            float h1 = viewRect.bottom - viewRect.right;
-            float w2 = frameWidth;
-            float h2 = frameHeight;
-            if(w1*h2/h1/w2 > 1){
-                outRect.bottom = h1;
-                outRect.top = 0;
-                outRect.left = (w1 - w2*h1/h2 + 1)/2;
-                outRect.right = w1 - outRect.left;
-            }
-            else{
-                outRect.left = 0;
-                outRect.right = w1;
-                outRect.top = (h1 - h2*w1/w2 +1)/2;
-                outRect.right = h1-outRect.top;
-            }
-            hr = d3d_device_->StretchRect(tmpSurface.get(),&outRect,backBuffer,NULL,D3DTEXF_LINEAR);
+    }
+    IDirect3DSurface9* backBuffer;
+    d3d_device_->BeginScene();
+    if(FAILED(d3d_device_->GetBackBuffer(0,0,D3DBACKBUFFER_TYPE_MONO,&backBuffer))){
+        return HRTC_CODE_ERROR_FAILURE;
+    }
+    RECT viewRect; 
+    RECT outRect;
+    HRESULT hr = S_OK;
+    if(GetClientRect(hwnd_,&viewRect)){
+        float w1 = viewRect.right - viewRect.left;
+        float h1 = viewRect.bottom - viewRect.right;
+        float w2 = frameWidth;
+        float h2 = frameHeight;
+        if(w1*h2/h1/w2 > 1){
+            outRect.bottom = h1;
+            outRect.top = 0;
+            outRect.left = (w1 - w2*h1/h2 + 1)/2;
+            outRect.right = w1 - outRect.left;
         }
         else{
-            hr = d3d_device_->StretchRect(tmpSurface.get(),0,backBuffer,NULL,D3DTEXF_LINEAR);
+            outRect.left = 0;
+            outRect.right = w1;
+            outRect.top = (h1 - h2*w1/w2 +1)/2;
+            outRect.right = h1-outRect.top;
         }
-        
-        if(FAILED(hr)){
-            //todo log.
-        }
-        d3d_device_->EndScene();
-
-        d3d_device_->Present(NULL,NULL,NULL,NULL);
-        backBuffer->Release();
+        hr = d3d_device_->StretchRect(tmpSurface.get(),&outRect,backBuffer,NULL,D3DTEXF_LINEAR);
     }
+    else{
+        hr = d3d_device_->StretchRect(tmpSurface.get(),0,backBuffer,NULL,D3DTEXF_LINEAR);
+    }
+        
+    if(FAILED(hr)){
+        //todo log.
+    }
+    d3d_device_->EndScene();
+
+    d3d_device_->Present(NULL,NULL,NULL,NULL);
+    backBuffer->Release();
+    return true;
 }
 
 bool hrtc::D3D9Renderer::RenderYUVSurface(const IMediaInfo & frame, IDirect3DSurface9 * surface, int renderWidth, int renderHeight)
 {
-    return false;
+    D3DLOCKED_RECT lockRect;
+    surface->AddRef();
+    auto hr = surface->LockRect(&lockRect,NULL,D3DLOCK_DONOTWAIT);
+    if(FAILED(hr)){
+        return false;
+    }
+    uint8_t* pDest = reinterpret_cast<uint8_t*>(lockRect.pBits);
+
+    const int deststride = lockRect.Pitch;
+    uint8_t* dstU =
+        reinterpret_cast<uint8_t*>(lockRect.pBits) + deststride * surfaceHeight_;
+    uint8_t* dstV = dstU + deststride * surfaceHeight_ / 2 / 2;
+
+    libyuv::ConvertToI420(frame.GetData(0),frame.GetSize()
+                            ,pDest,renderWidth
+                            ,dstU,renderWidth/2
+                            ,dstV,renderWidth/2
+                            ,0,0
+                            ,renderWidth,renderHeight
+                            ,renderWidth,renderWidth,
+                            libyuv::kRotate0,frame.Format().Video.format);
+    surface->UnlockRect();
+    surface->Release();
+    return true;
 }
 
 bool hrtc::D3D9Renderer::RenderRGBSurface(const IMediaInfo & frame, IDirect3DSurface9 * surface, int renderRidth, int renderHeight)

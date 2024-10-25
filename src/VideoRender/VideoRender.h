@@ -1,6 +1,7 @@
 #pragma once
 #include<cstdint>
 #include <Headers/MediaInfo.h>
+#include <Base/ErrorCode.h>
 namespace hrtc
 {
 class VideoRenderer {
@@ -30,7 +31,7 @@ public:
 
   virtual bool Init(void* window) { return true; }
 
-  virtual int RenderFrame(const IMediaInfo& frame){};
+  virtual int RenderFrame(const IMediaInfo& frame){ return HRTC_CODE_ERROR_FAILURE;};
 
   // By default, VideoRenderer will present video. Through disable video
   // present, discrete app will present video frame instead.
