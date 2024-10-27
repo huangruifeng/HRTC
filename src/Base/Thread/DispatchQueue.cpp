@@ -3,7 +3,6 @@
 #include <vector>
 #include <sstream>
 #include <thread>
-
 namespace dispatch_task_queue {
     template<class T>
     class priority_queue
@@ -75,8 +74,7 @@ namespace dispatch_task_queue {
     };
 
 
-    template<class TCond = std::condition_variable>
-    class mutex_task_queue : public task_queue
+    class mutex_task_queue : public task_queue, public std::enable_shared_from_this<mutex_task_queue>
     {
     public:
         mutex_task_queue(int thread_count, const std::string &name) :task_queue(thread_count, name),
@@ -104,7 +102,7 @@ namespace dispatch_task_queue {
     protected:
         void sync_imp(std::shared_ptr<task_signal> task) override
         {
-            if(_thread_count == 1 && 
+            if(_thread_ids.size() == 1 &&
                 _thread_ids[0] == std::this_thread::get_id())
             {
                 task->reset();
@@ -123,7 +121,6 @@ namespace dispatch_task_queue {
             {
                 return -2;
             }
-
             _mutex.lock();
             task->reset();
             _tasks.push(task);
@@ -168,8 +165,7 @@ namespace dispatch_task_queue {
     private:
         void* thread_func(std::string name)
         {
-            _thread_ids.emplace_back(std::this_thread::get_id());
-
+            _self = shared_from_this();
             while(!_cancel)
             {
                 std::unique_lock<std::mutex> signal_mutex(_signal_mutex);
@@ -187,7 +183,7 @@ namespace dispatch_task_queue {
                 {
                     _mutex.lock();
 
-                    int size = _delat_tasks.size();
+                    auto size = _delat_tasks.size();
                     for(int i = 0;i<size;i++)
                     {
                         const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -230,6 +226,7 @@ namespace dispatch_task_queue {
         void create_thread(std::string name)
         {
             _threads.emplace_back(new std::thread([this,name]{
+                _thread_ids.emplace_back(std::this_thread::get_id());
                 thread_func(name);
             }));
         }
@@ -238,6 +235,7 @@ namespace dispatch_task_queue {
         std::vector<std::thread::id> _thread_ids;
         std::recursive_mutex _mutex;
         std::mutex _signal_mutex;
+        using TCond = std::condition_variable;
         TCond _condition;
 
         priority_queue<std::shared_ptr<task_signal>> _tasks;
@@ -246,8 +244,9 @@ namespace dispatch_task_queue {
         int _thread_count;
         const int _max_queue_length = 2048;
         uint64_t _runUtcTime;
+        
     };
-
+    thread_local std::shared_ptr<task_queue> task_queue::_self ;
 
     std::shared_ptr<task_queue> create(int thread_count)
     {
@@ -261,6 +260,7 @@ namespace dispatch_task_queue {
 
     std::shared_ptr<task_queue> create(int thread_count, const std::string& name)
     {
-        return std::static_pointer_cast<task_queue>(std::make_shared<mutex_task_queue<>>(thread_count, name));
+        return std::static_pointer_cast<task_queue>(std::make_shared<mutex_task_queue>(thread_count, name));
     }
 }
+

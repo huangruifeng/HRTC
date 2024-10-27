@@ -3,9 +3,10 @@
 #include "Pin/InputPin.h"
 #include <vector>
 #include <memory>
-
+#include <Headers/HrtcEngine.h>
 namespace hrtc {
-class BaseNode : public OutputPinObserver
+class BaseNode : public virtual INode
+               , public OutputPinObserver
                , public InputPinObserver {
 public:
     enum NodeType{

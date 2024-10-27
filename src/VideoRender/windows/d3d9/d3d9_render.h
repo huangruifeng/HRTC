@@ -4,6 +4,7 @@
 #include <d3d9.h>
 #include <Base/HrtcRefPtr.h>
 #include <Base/Thread/DispatchQueue.h>
+#pragma comment(lib, "d3d9.lib")
 namespace hrtc{
 
 class D3D9Renderer : public VideoRenderer {

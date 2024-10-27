@@ -12,7 +12,6 @@
 
 #include <dvdmedia.h>
 #include "Base/base.h"
-//#include "modules/video_capture/video_capture_config.h"
 #include "VideoCapture/windows/ds/help_functions_ds.h"
 
 namespace hrtc {

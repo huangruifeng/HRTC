@@ -10,6 +10,7 @@ BaseNode::NodeType hrtc::BaseNode::GetType() const
 
 hrtc::BaseNode::BaseNode(NodeType type, NodeFormatType formatType):m_type(type),m_formatType(formatType),m_configured(false)
 {
+    CheckPinListStatus();
 }
 
 RtcResult hrtc::BaseNode::Connect(IPin * nextPin)
@@ -81,6 +82,7 @@ int32_t hrtc::BaseNode::ConnectDefault(BaseNode * const nextNode)
     }
     return Connect(nextNode->m_inputPins[0].get());
 }
+
 
 RtcResult hrtc::BaseNode::DisconnectAll()
 {

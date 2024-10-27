@@ -26,7 +26,7 @@ hrtc::D3D9Renderer::~D3D9Renderer()
 
 bool hrtc::D3D9Renderer::Init(void * window)
 {
-    if(!window || IsWindow((HWND)window)){
+    if(!window || !IsWindow((HWND)window)){
         return false;
     }
     hwnd_ = (HWND)window;
@@ -46,19 +46,30 @@ bool hrtc::D3D9Renderer::Init(void * window)
                 return false;
             }
         }
-        D3DPRESENT_PARAMETERS d3dParams;
-        d3dParams.Windowed = true;
+        D3DPRESENT_PARAMETERS d3dParams = {};
+        d3dParams.Windowed = TRUE;
         d3dParams.SwapEffect = D3DSWAPEFFECT_DISCARD;
         d3dParams.BackBufferWidth = backbufferWidth_;
         d3dParams.BackBufferHeight = backbufferHeight_;
         d3dParams.BackBufferFormat = D3DFMT_UNKNOWN;
         d3dParams.hDeviceWindow = hwnd_;
 
+        D3DCAPS9 caps;
+        DWORD vertexProcessing = 0;
+        d3dGloba_->GetDeviceCaps(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, &caps);
+        if ((caps.DevCaps & D3DDEVCAPS_HWTRANSFORMANDLIGHT) ==
+            D3DDEVCAPS_HWTRANSFORMANDLIGHT) {
+            vertexProcessing = D3DCREATE_HARDWARE_VERTEXPROCESSING;
+        }
+        else {
+            vertexProcessing = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
+        }
+
         IDirect3DDevice9Ex* d3dDevice;
         int retryCount = 0;
         do {
             hr = d3dGloba_ ->CreateDeviceEx(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd_,
-                D3DCREATE_MIXED_VERTEXPROCESSING | D3DCREATE_MULTITHREADED | D3DCREATE_FPU_PRESERVE,
+                vertexProcessing | D3DCREATE_MULTITHREADED | D3DCREATE_FPU_PRESERVE,
                 &d3dParams, NULL, &d3dDevice);
             if(SUCCEEDED(hr)){
                 d3d_device_ = d3dDevice;
@@ -95,9 +106,9 @@ int hrtc::D3D9Renderer::RenderFrame(const IMediaInfo & frame)
 
     if(backbufferWidth_ != frameWidth || backbufferHeight_ != frameHeight){
         backbufferWidth_ = frameWidth;
-        backbufferHeight_ = frameWidth;
+        backbufferHeight_ = frameHeight;
         GetCreationTaskQueue()->sync([this]{
-            D3DPRESENT_PARAMETERS d3dParams;
+            D3DPRESENT_PARAMETERS d3dParams{};
             d3dParams.Windowed = true;
             d3dParams.SwapEffect = D3DSWAPEFFECT_DISCARD;
             d3dParams.BackBufferWidth = backbufferWidth_;
@@ -117,7 +128,8 @@ int hrtc::D3D9Renderer::RenderFrame(const IMediaInfo & frame)
             IDirect3DSurface9* surface = nullptr;
             auto hr = d3d_device_->CreateOffscreenPlainSurface(frameWidth,
                 frameHeight,
-                (D3DFORMAT)MAKEFOURCC('I', '4', '2', '0'), //todo support rgb
+                //(D3DFORMAT)MAKEFOURCC('I', '4', '2', '0'), //todo support rgb
+                D3DFMT_A8R8G8B8,
                 D3DPOOL_DEFAULT,
                 &surface,
                 NULL);
@@ -135,7 +147,7 @@ int hrtc::D3D9Renderer::RenderFrame(const IMediaInfo & frame)
 
     auto tmpSurface = surface_;
     if(tmpSurface){
-        if(!RenderYUVSurface(frame,tmpSurface.get(),frameWidth,frameHeight)){
+        if(!RenderRGBSurface(frame,tmpSurface.get(),frameWidth,frameHeight)){
             return HRTC_CODE_ERROR_FAILURE;//todo log.
         }
     }
@@ -148,23 +160,23 @@ int hrtc::D3D9Renderer::RenderFrame(const IMediaInfo & frame)
     RECT outRect;
     HRESULT hr = S_OK;
     if(GetClientRect(hwnd_,&viewRect)){
-        float w1 = viewRect.right - viewRect.left;
-        float h1 = viewRect.bottom - viewRect.right;
+  /*      float w1 = viewRect.right - viewRect.left;
+        float h1 = viewRect.bottom - viewRect.top;
         float w2 = frameWidth;
         float h2 = frameHeight;
         if(w1*h2/h1/w2 > 1){
             outRect.bottom = h1;
             outRect.top = 0;
-            outRect.left = (w1 - w2*h1/h2 + 1)/2;
+            outRect.left = (w1 - w2*h1/h2 )/ 2;
             outRect.right = w1 - outRect.left;
         }
-        else{
+        else{ 
             outRect.left = 0;
             outRect.right = w1;
-            outRect.top = (h1 - h2*w1/w2 +1)/2;
-            outRect.right = h1-outRect.top;
-        }
-        hr = d3d_device_->StretchRect(tmpSurface.get(),&outRect,backBuffer,NULL,D3DTEXF_LINEAR);
+            outRect.top = (h1 - h2*w1/w2)/2;
+            outRect.bottom = h1-outRect.top;
+        }*/
+        hr = d3d_device_->StretchRect(tmpSurface.get(),NULL,backBuffer, NULL,D3DTEXF_LINEAR);
     }
     else{
         hr = d3d_device_->StretchRect(tmpSurface.get(),0,backBuffer,NULL,D3DTEXF_LINEAR);
@@ -208,9 +220,27 @@ bool hrtc::D3D9Renderer::RenderYUVSurface(const IMediaInfo & frame, IDirect3DSur
     return true;
 }
 
-bool hrtc::D3D9Renderer::RenderRGBSurface(const IMediaInfo & frame, IDirect3DSurface9 * surface, int renderRidth, int renderHeight)
+bool hrtc::D3D9Renderer::RenderRGBSurface(const IMediaInfo & frame, IDirect3DSurface9 * surface, int renderWidth, int renderHeight)
 {
-    return false;
+    D3DLOCKED_RECT lockRect;
+    surface->AddRef();
+    auto hr = surface->LockRect(&lockRect, NULL, D3DLOCK_DONOTWAIT);
+    if (FAILED(hr)) {
+        return false;
+    }
+    uint8_t* pDest = reinterpret_cast<uint8_t*>(lockRect.pBits);
+
+    const int deststride = lockRect.Pitch;
+    
+    libyuv::ConvertToARGB(frame.GetData(0), frame.GetSize()
+        , pDest, deststride
+        , 0,0
+        ,renderWidth,renderHeight
+        ,renderWidth,renderHeight
+        ,libyuv::kRotate0, frame.Format().Video.format);
+    surface->UnlockRect();
+    surface->Release();
+    return true;
 }
 
 

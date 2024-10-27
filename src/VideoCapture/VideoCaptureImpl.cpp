@@ -27,16 +27,16 @@ int32_t VideoCaptureImpl::RotationFromDegrees(int degrees,
                                               VideoRotation* rotation) {
   switch (degrees) {
     case 0:
-      *rotation = kVideoRotation_0;
+      *rotation = VideoRotation::kVideoRotation_0;
       return 0;
     case 90:
-      *rotation = kVideoRotation_90;
+      *rotation = VideoRotation::kVideoRotation_90;
       return 0;
     case 180:
-      *rotation = kVideoRotation_180;
+      *rotation = VideoRotation::kVideoRotation_180;
       return 0;
     case 270:
-      *rotation = kVideoRotation_270;
+      *rotation = VideoRotation::kVideoRotation_270;
       return 0;
     default:
       return -1;
@@ -48,16 +48,16 @@ int32_t VideoCaptureImpl::RotationFromDegrees(int degrees,
 int32_t VideoCaptureImpl::RotationInDegrees(VideoRotation rotation,
                                             int* degrees) {
   switch (rotation) {
-    case kVideoRotation_0:
+  case VideoRotation::kVideoRotation_0:
       *degrees = 0;
       return 0;
-    case kVideoRotation_90:
+  case VideoRotation::kVideoRotation_90:
       *degrees = 90;
       return 0;
-    case kVideoRotation_180:
+  case VideoRotation::kVideoRotation_180:
       *degrees = 180;
       return 0;
-    case kVideoRotation_270:
+  case VideoRotation::kVideoRotation_270:
       *degrees = 270;
       return 0;
   }
@@ -71,7 +71,7 @@ VideoCaptureImpl::VideoCaptureImpl()
       _lastFrameRateCallbackTimeNanos(hrtc::TimeNanos()),
       _rawDataCallBack(NULL),
       _lastProcessFrameTimeNanos(hrtc::TimeNanos()),
-      _rotateFrame(kVideoRotation_0),
+      _rotateFrame(VideoRotation::kVideoRotation_0),
       apply_rotation_(false) {
   _requestedCapability.width = kDefaultWidth;
   _requestedCapability.height = kDefaultHeight;

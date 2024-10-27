@@ -2,6 +2,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <chrono>
+#include <memory>
 namespace dispatch_task_queue 
 {
     enum task_priority
@@ -83,6 +84,7 @@ namespace dispatch_task_queue
     class task_queue
     {
     public:
+
         task_queue(int thread_count, const std::string&name = "") :_name(name) {}
         virtual ~task_queue() = default;
 
@@ -135,12 +137,18 @@ namespace dispatch_task_queue
             return _name;
         }
 
+        static std::shared_ptr<task_queue> current() {
+            return task_queue::_self;
+        }
+
     protected:
         virtual void sync_imp(std::shared_ptr<task_signal> task) = 0;
 
         virtual int64_t async_imp(std::shared_ptr<task_signal> task) = 0;
 
         virtual int64_t async_delay_imp(std::shared_ptr<task_signal> task) = 0;
+
+        static thread_local std::shared_ptr<task_queue> _self;
     private:
         std::string _name;
     };

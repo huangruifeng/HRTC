@@ -12,4 +12,4 @@ elseif(HRTC_LINUX)
 endif()
 
 add_library(${target_name} STATIC ${VIDEO_RENDER_SOURCE} ${VIDEO_RENDER_PLATFORM_SOURCE})
-target_link_libraries(${target_name} hrtc_base ly_lib_static)
+target_link_libraries(${target_name} hrtc_base yuv)

@@ -13,7 +13,7 @@
 namespace hrtc {
 
 // enum for clockwise rotation.
-enum VideoRotation {
+enum class VideoRotation {
   kVideoRotation_0 = 0,
   kVideoRotation_90 = 90,
   kVideoRotation_180 = 180,

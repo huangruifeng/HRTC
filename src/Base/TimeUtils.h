@@ -22,7 +22,7 @@ namespace hrtc
     int64_t TimeMillis();
     // Deprecated. Do not use this in any new code.
     inline int64_t Time() {
-    return TimeMillis();
+        return TimeMillis();
     }
 
     // Returns the current time in microseconds.

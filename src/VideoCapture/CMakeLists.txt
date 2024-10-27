@@ -1,18 +1,18 @@
 set(target_name "hrtc_video_capture")
-option(ENABLE_MEDIA_FOUNDATION "开启media foundation" ON)
-
-
+option(ENABLE_MEDIA_FOUNDATION "开启media foundation" OFF)
+set(ENABLE_MEDIA_FOUNDATION OFF)
+message(${ENABLE_MEDIA_FOUNDATION})
 file(GLOB VIDEO_CAPTURE_SOURCE  *.h *.cpp)
 if(HRTC_WINDOWS)
     file(GLOB VIDEO_PLATFORM_SOURCE     windows/ds/*.h 
                                         windows/ds/*.cc 
                                         windows/*.cc
                                         )
-    #if(ENABLE_MEDIA_FOUNDATION)
+    if(ENABLE_MEDIA_FOUNDATION)
         add_definitions(-DENABLE_MEDIA_FOUNDATION=1)
         file(GLOB MEDIA_FOUNDATION_SOURCE windows/mf/*.h windows/mf/*.cc)
         list(APPEND VIDEO_PLATFORM_SOURCE ${MEDIA_FOUNDATION_SOURCE})
-    #endif()
+    endif()
 elseif(HRTC_LINUX)
     file(GLOB VIDEO_PLATFORM_SOURCE  linux/*.h linux/*.cpp)
 endif()

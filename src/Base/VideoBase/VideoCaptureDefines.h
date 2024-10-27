@@ -12,6 +12,7 @@
 
 #include"Base/VideoBase/VideoRotation.h"
 #include <cstdint>
+#include <Headers/MediaInfo.h>
 namespace hrtc {
 
 enum {
@@ -37,8 +38,6 @@ enum class VideoType {
   kNV12,
 };
 
-size_t CalcBufferSize(VideoType type, int width, int height);
-
 struct VideoCaptureCapability {
   int32_t width;
   int32_t height;
@@ -53,6 +52,30 @@ struct VideoCaptureCapability {
     videoType = VideoType::kUnknown;
     interlaced = false;
   }
+
+  int GetVideoFormat()const {
+      switch (videoType) {
+      case VideoType::kUnknown:
+          return VideoFormat::Unknown;
+      case VideoType::kI420:
+          return VideoFormat::I420;
+      case VideoType::kIYUV:  // same as VideoType::kYV12
+      case VideoType::kYV12:
+          return VideoFormat::IYUV;
+      case VideoType::kABGR:
+          return VideoFormat::ABGR;
+      case VideoType::kYUY2:
+          return VideoFormat::YUY2;
+      case VideoType::kMJPEG:
+          return VideoFormat::MJPEG;
+      case VideoType::kNV12:
+          return VideoFormat::NV12;
+      case VideoType::kARGB:
+          return VideoFormat::ARGB;
+      }
+      return VideoFormat::Unknown;
+  }
+
   bool operator!=(const VideoCaptureCapability& other) const {
     if (width != other.width)
       return true;
