@@ -23,28 +23,6 @@ RtcResult hrtc::VideoSinkNode::Deinit()
     return HRTC_CODE_OK;
 }
 
-RtcResult hrtc::VideoSinkNode::Connect(INode* node)
-{
-    RtcResult res = HRTC_CODE_ERROR_THREAD_NULLPTR;
-    if (m_thread) {
-        m_thread->sync([this, &res, node] {
-            res = ConnectDefault(dynamic_cast<BaseNode*>(node));
-        });
-    }
-    return res;
-}
-
-RtcResult hrtc::VideoSinkNode::Disconnect(INode* node)
-{
-    RtcResult res = HRTC_CODE_ERROR_THREAD_NULLPTR;
-    if (m_thread) {
-        m_thread->sync([this, &res, node] {
-            res = Disconnect(dynamic_cast<BaseNode*>(node));
-        });
-    }
-    return res;
-}
-
 hrtc::VideoSinkNode::VideoSinkNode():BaseNode(SINK, VIDEO),m_thread(dispatch_task_queue::task_queue::current()),m_init(false)
 {
 }

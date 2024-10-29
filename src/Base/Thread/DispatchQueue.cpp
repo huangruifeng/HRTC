@@ -165,7 +165,6 @@ namespace dispatch_task_queue {
     private:
         void* thread_func(std::string name)
         {
-            _self = shared_from_this();
             while(!_cancel)
             {
                 std::unique_lock<std::mutex> signal_mutex(_signal_mutex);
@@ -207,6 +206,11 @@ namespace dispatch_task_queue {
                     std::shared_ptr<task_signal> task(_tasks.top());
                     _tasks.pop();
                     _mutex.unlock();
+
+                    if(!_self){
+                        _self = shared_from_this();
+                    }
+
                     if(nullptr != task)
                     {
                         try

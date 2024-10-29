@@ -4,6 +4,28 @@
 #include <vector>
 #include <memory>
 #include <Headers/HrtcEngine.h>
+
+#define DEFINE_INODE_IMP(api_thread)  \
+RtcResult Connect(INode* node) override{\
+    RtcResult res = HRTC_CODE_ERROR_THREAD_NULLPTR;\
+    if (api_thread) {\
+    api_thread->sync([this, &res,node] {\
+        res = ConnectDefault(dynamic_cast<BaseNode*>(node));\
+    });\
+}\
+return res;\
+}\
+RtcResult Disconnect(INode* node) override{\
+    RtcResult res = HRTC_CODE_ERROR_THREAD_NULLPTR;\
+    if (api_thread) {\
+        api_thread->sync([this, &res, node] {\
+            res = Disconnect(dynamic_cast<BaseNode*>(node));\
+        });\
+    }\
+    return res;\
+}
+
+
 namespace hrtc {
 class BaseNode : public virtual INode
                , public OutputPinObserver

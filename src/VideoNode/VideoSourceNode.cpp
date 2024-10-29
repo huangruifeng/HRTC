@@ -66,27 +66,6 @@ RtcResult hrtc::VideoSourceNode::StopCapture()
     return res;
 }
 
-RtcResult hrtc::VideoSourceNode::Connect(INode* node)
-{
-    RtcResult res = HRTC_CODE_ERROR_THREAD_NULLPTR;
-    if (m_thread) {
-        m_thread->sync([this, &res,node] {
-           res = ConnectDefault(dynamic_cast<BaseNode*>(node));
-        });
-    }
-    return res;
-}
-
-RtcResult hrtc::VideoSourceNode::Disconnect(INode* node)
-{
-    RtcResult res = HRTC_CODE_ERROR_THREAD_NULLPTR;
-    if (m_thread) {
-        m_thread->sync([this, &res, node] {
-            res = Disconnect(dynamic_cast<BaseNode*>(node));
-        });
-    }
-    return res;
-}
 
 RtcResult hrtc::VideoSourceNode::StartInternal()
 {

@@ -10,10 +10,9 @@
 namespace hrtc {
     class VideoSinkNode : public IVideoRenderSink ,public BaseNode {
     public:
+        DEFINE_INODE_IMP(m_thread)
         virtual RtcResult Init(void* hwnd) override;
         virtual RtcResult Deinit() override;
-        RtcResult Connect(INode* node) override;
-        RtcResult Disconnect(INode* node) override;
         VideoSinkNode();
         ~VideoSinkNode();
 

@@ -9,14 +9,14 @@
 namespace hrtc {
     class VideoSourceNode : public IVideoCaptureSource ,public BaseNode, public  RawVideoSinkInterface{
     public:
+        DEFINE_INODE_IMP(m_thread)
+
         VideoSourceNode();
         ~VideoSourceNode();
         RtcResult InitDevice(const std::string&id) override;
         RtcResult StartCapture() override;
         RtcResult StopCapture() override;
 
-        RtcResult Connect(INode* node) override;
-        RtcResult Disconnect(INode* node) override;
     protected:
         RtcResult StartInternal();
         RtcResult StopInternal();
