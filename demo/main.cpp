@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <string>
 #include "model.h"
+#include "Whiteboard/board.h"
 class MainWindow : public RtcModel {
 public:
     MainWindow(HINSTANCE hInstance);
@@ -24,10 +25,17 @@ private:
     int CurrentComBoxIndex;
 };
 
+#define WHITE_BOARD
 // Ö÷º¯Êý
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
+#ifdef WHITE_BOARD
+    WhiteBoardWin mainWindow;
+    mainWindow.Create(L"board", WS_OVERLAPPEDWINDOW,0, CW_USEDEFAULT, CW_USEDEFAULT, 1080, 720);
+    mainWindow.Show(true);
+#else
     MainWindow mainWindow(hInstance);
     mainWindow.Show(nCmdShow);
+#endif;
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {

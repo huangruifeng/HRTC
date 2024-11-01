@@ -5,6 +5,7 @@
 #include <vector>
 #include <functional>
 #include <Base/ErrorCode.h>
+
 namespace hrtc {
 class SingleThreaded {
 public:

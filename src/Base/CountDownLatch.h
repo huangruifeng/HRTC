@@ -23,6 +23,16 @@ public:
     }
 
     /*
+     reset CountDownLatch
+    */
+    bool Reset(int count) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_count > 0) return false;
+        m_count = count;
+        return true;
+    }
+
+    /*
      await causes the caller to wait until the latch is counted down to zero.
     */
     void Await() {

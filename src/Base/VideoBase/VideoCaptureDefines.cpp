@@ -1,7 +1,7 @@
 #include <Base/VideoBase/VideoCaptureDefines.h>
 using namespace hrtc;
 
-size_t CalcBufferSize(VideoType type, int width, int height) {
+size_t hrtc::CalcBufferSize(VideoType type, int width, int height) {
   switch (type) {
     case VideoType::kI420:
     case VideoType::kIYUV:

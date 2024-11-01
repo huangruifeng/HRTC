@@ -19,7 +19,7 @@ public:
     PointTemplate<T>& operator-=(const PointTemplate<T>& p) { x -= p.x; y -= p.y; return *this; }
     uint32_t static  Distance(const PointTemplate<T>& pt1, const PointTemplate<T>& pt2)
     {
-        return std::sqrt(std::pow((pt2.x - pt1.x), 2) + std::pow((pt2.y - pt1.y), 2));
+        return (uint32_t)std::sqrt(std::pow((pt2.x - pt1.x), 2) + std::pow((pt2.y - pt1.y), 2));
     }
 };
 
@@ -36,10 +36,10 @@ inline bool operator!=(const PointTemplate<T>& p1, const PointTemplate<T>& p2)
 }
 
 using Point = PointTemplate<int>;
-using DoublePoint = PointTemplate<double>;
+using FloatPoint = PointTemplate<float>;
 template<>
 // comparison
-inline bool operator==(const DoublePoint& p1, const DoublePoint& p2)
+inline bool operator==(const FloatPoint& p1, const FloatPoint& p2)
 {
     return (abs(p1.x - p2.x)<1e-8) && abs(p1.y - p2.y) < 1e-8;
 }
@@ -191,11 +191,11 @@ public:
     bool Intersection(const Linesegment& L2,Point& point)
     {
         float x, y = 0.0;
-        const auto result = GetLineIntersection(start.x, start.y, end.x, end.y, L2.start.x, L2.start.y, L2.end.x, L2.end.y,&x,&y);
+        const auto result = GetLineIntersection((float)start.x, (float)start.y, (float)end.x, (float)end.y, (float)L2.start.x, (float)L2.start.y, (float)L2.end.x, (float)L2.end.y,&x,&y);
         if(result == 1)
         {
-            point.x = std::round(x);
-            point.y = std::round(y);
+            point.x = (int)std::round(x);
+            point.y =(int)std::round(y);
         }
         return result==1;
     }
@@ -278,6 +278,7 @@ public:
 class Path {
 public:
 	Path(){
+        enableInsertInternalPoint = true;
 		Reset();
 	}
 	Path(const Path &other)
@@ -287,6 +288,7 @@ public:
 		color = other.color;
 		points = other.points;
         bounding = other.bounding;
+        minDistance = other.minDistance;
 	}
     void SetMinDistance(int min){
         minDistance = min;
@@ -296,6 +298,15 @@ public:
         points.push_back(point);
         bounding.Update(point.x,point.y);
     }
+
+    void EnablePointInsert(bool enable) {
+        enableInsertInternalPoint = enable;
+    }
+
+    bool PointInsertEnabled() {
+        return enableInsertInternalPoint;
+    }
+
     bool operator==(const Path& p){
         return id == p.id;
     }
@@ -306,15 +317,17 @@ public:
 
 	void Reset()
 	{
-		id = "";
+        std::chrono::system_clock::duration d =
+            std::chrono::system_clock::now().time_since_epoch();
+        id = std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(d).count());
 		width = 0;
 		color = 0;
 		points.clear();
         bounding = Rect{0,0,0,0};
-        minDistance = 5;
+        minDistance = 20;
 	}
 
-    void InsertPoint(std::vector<Point>& points, const Point&end, int minDistance)
+    static void InsertPoint(std::vector<Point>& points, const Point&end, uint32_t minDistance)
     {
         if (points.empty())
             return;
@@ -337,17 +350,17 @@ public:
         }
     }
 
-    Point GetInterPoint(const DoublePoint& begin, const DoublePoint& end, double distance)
+    static Point GetInterPoint(const FloatPoint& begin, const FloatPoint& end, uint32_t distance)
     {
-        if (std::abs(end.x - begin.y) < 0.0001) //斜率不存在的情况
+        if (std::abs(end.x - begin.x) < 0.0001) //斜率不存在的情况
         {
-            if ((end.x - begin.y) >= 0)
+            if ((end.y - begin.y) >= 0)
             {
-                return { std::round(begin.x), std::round(begin.y) + distance };
+                return { (int)std::round(begin.x), (int)std::round(begin.y) + (int)distance };
             }
             else
             {
-                return { std::round(begin.x), std::round(begin.y) - distance };
+                return { (int)std::round(begin.x), (int)std::round(begin.y) - (int)distance };
             }
         }
         else
@@ -382,7 +395,7 @@ public:
 
             const auto y = k * x + b;
 
-            return { std::round(x), std::round(y)};
+            return { (int)x, (int)y};
         }
     }
 
@@ -393,6 +406,7 @@ public:
     int                             minDistance;
     //笔迹的外接矩形，在擦除的时候用来判断橡皮檫与笔迹是否相交，用以减少遍历的点数
     BoundaryRect                    bounding;
+    bool                            enableInsertInternalPoint;
 };
 
 class Page {
@@ -401,11 +415,63 @@ public:
         paths.push_back(p);
     }
 
+    Page() {
+        scale = 1.0;
+        EnableEraserInsert(false);
+    };
+
+    Page(const Page& p) {
+        pageId = p.pageId;
+        paths = p.paths;
+        scale = p.scale;
+    }
+
     void Delete(const Path&p){
         auto it = std::find(paths.begin(),paths.end(),p);
         if(it != paths.end()){
             paths.erase(it);
         }
+    }
+
+    void Clear() {
+        paths.clear();
+    }
+
+    void EnableEraserInsert(bool enable) {
+        eraserSessionId = -1;
+        enableEraserInsert = enable;
+        insertInstance = 5;
+    }
+
+    bool EraserInsertEnabled() {
+        return enableEraserInsert;
+    }
+
+    void Eraser(const Rect& rc, int sid) {
+        if (enableEraserInsert) {
+
+            if (sid != eraserSessionId) {
+                insertPoints.clear();
+                eraserSessionId = sid;
+            }
+            else {
+                if (!insertPoints.empty()) {
+                    Path::InsertPoint(insertPoints, rc.GetLeftTop(), insertInstance);
+                }
+            }
+            
+            insertPoints.push_back(rc.GetLeftTop());
+        }
+
+        for (auto& p : insertPoints) {
+            Eraser({p.x,p.y,rc.width,rc.height});
+        }
+
+        if (enableEraserInsert) {
+            insertPoints.clear();
+            insertPoints.push_back(rc.GetLeftTop());
+        }
+
     }
 
     void Eraser(const Rect& rc){
@@ -559,6 +625,10 @@ public:
     std::string pageId;
     std::list<Path> paths;
     float scale;
+    bool enableEraserInsert;
+    int eraserSessionId;
+    int insertInstance;
+    std::vector<Point> insertPoints;
 private:
     Point PointOfIntersection(const std::vector<Point>::iterator& it,const Rect& orc)
     {

@@ -1,6 +1,6 @@
 set(target_name "hrtc_video_capture")
 option(ENABLE_MEDIA_FOUNDATION "开启media foundation" OFF)
-set(ENABLE_MEDIA_FOUNDATION OFF)
+set(ENABLE_MEDIA_FOUNDATION ON)
 message(${ENABLE_MEDIA_FOUNDATION})
 file(GLOB VIDEO_CAPTURE_SOURCE  *.h *.cpp)
 if(HRTC_WINDOWS)
@@ -21,5 +21,5 @@ add_library(${target_name} STATIC ${VIDEO_CAPTURE_SOURCE} ${VIDEO_PLATFORM_SOURC
 target_link_libraries(${target_name} hrtc_base)
 
 if(HRTC_WINDOWS)
-    target_link_libraries(${target_name} ole32 oleaut32 strmiids user32)
+    target_link_libraries(${target_name} hrtc_base ole32 oleaut32 strmiids user32  mf mfplat mfuuid mfreadwrite dxva2 shlwapi)
 endif()

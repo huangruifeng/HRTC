@@ -38,6 +38,8 @@ enum class VideoType {
   kNV12,
 };
 
+size_t CalcBufferSize(VideoType type, int width, int height);
+
 struct VideoCaptureCapability {
   int32_t width;
   int32_t height;
