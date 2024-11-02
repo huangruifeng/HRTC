@@ -39,6 +39,8 @@ public:
     }
     virtual LRESULT HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
 
+    void ShowToolButton();
+
     void DrawLine(HDC hdc, POINT pt1, POINT pt2, COLORREF color);
     void ShowColorDialog(COLORREF* color);
 
@@ -52,11 +54,21 @@ public:
     void ReferceCanvas(const std::list<whiteboard::Path>& data);
 
     bool CheckPoint(POINT x);
+
+    enum ToolId {
+        ID_BEGIN = 1,
+        ID_COLOR = ID_BEGIN,
+        ID_EDIT,
+        ID_CLEAR,
+
+        ID_COUNT
+    };
 private:
     POINT lastPoint = { -1, -1 };
     BOOL eraserMode = FALSE;
     int penSession = 0;
     int eraserSession = 0;
+    HWND toolButton[ID_COUNT] ;
 };
 
 

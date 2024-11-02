@@ -22,10 +22,12 @@ private:
     HWND hChildWindows[4]; // 用于存储显示区的子窗口
     HWND hwnd;
 
+    WhiteBoardWin boardWindow;
+
     int CurrentComBoxIndex;
 };
 
-#define WHITE_BOARD
+//#define WHITE_BOARD
 // 主函数
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int nCmdShow) {
 #ifdef WHITE_BOARD
@@ -109,8 +111,14 @@ void MainWindow::CreateDisplayArea(HWND hwnd) {
 
     // 在显示区内部创建控件
     for (int i = 0; i < 4; ++i) {
-        hChildWindows[i] = CreateWindow(L"STATIC", NULL, WS_VISIBLE | WS_CHILD | WS_BORDER,
-            0, 0, 0, 0, hDisplayArea, NULL, NULL, NULL);
+        if (i == 2) {
+            boardWindow.Create(L"STATIC", WS_VISIBLE | WS_CHILD | WS_BORDER, 0, 0, 0, 0, 0, hDisplayArea);
+            hChildWindows[i] = boardWindow.Window();
+        }
+        else {
+            hChildWindows[i] = CreateWindow(L"STATIC", NULL, WS_VISIBLE | WS_CHILD | WS_BORDER,
+                0, 0, 0, 0, hDisplayArea, NULL, NULL, NULL);
+        }
     }
 }
 

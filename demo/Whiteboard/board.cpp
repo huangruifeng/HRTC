@@ -1,9 +1,7 @@
 #include "board.h"
 
-#define ID_COLOR 1
-#define ID_ERASER 2
-#define ID_CLEAR 3
 #define WM_REFERCE_CANVAS (WM_USER + 1)
+#define WM_SHOW_TOOL (WM_USER + 2)
 const int ERASER_WIDTH = 20; // 橡皮擦大小
 const int ERASER_HEIGHT = 30;
 LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -41,6 +39,7 @@ LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
                 ReferceCanvas(((whiteboard::Page*)wParam)->paths);
                 hrtc::HEvent* e = (hrtc::HEvent*)lParam;
                 e->set();
+                ShowToolButton();
             }
             break;
         }
@@ -99,14 +98,21 @@ LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
                 eraserMode = FALSE;
             }
         }
-        else if (LOWORD(wParam) == ID_ERASER) {
+        else if (LOWORD(wParam) == ID_EDIT) {
             eraserMode = !eraserMode;
+            if (eraserMode) {
+                SetWindowText(toolButton[ID_EDIT], L"笔");
+            }
+            else {
+                SetWindowText(toolButton[ID_EDIT], L"橡皮擦");
+            }
         }
         else if (LOWORD(wParam) == ID_CLEAR) {
             HDC hdc = GetDC(m_hwnd);
             SetBackgroundColor(hdc);
             ReleaseDC(m_hwnd, hdc);
             OnDataClear();
+            ShowToolButton();
         }
         break;
 
@@ -117,12 +123,20 @@ LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
         PAINTSTRUCT ps;
         int i = 0;
         HDC hdc = BeginPaint(m_hwnd, &ps);
+        
         whiteboard::Page page;
         GetCurrentPage(page);
         ReferceCanvas(page.paths);
         EndPaint(m_hwnd, &ps);
+        //SendMessage(m_hwnd, WM_SHOW_TOOL, 0,0);
         break;
     }
+    case WM_SHOW_TOOL:
+    case WM_SIZE: {
+        ShowToolButton();
+        break;
+    }
+        
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
@@ -131,6 +145,31 @@ LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
         return DefWindowProc(m_hwnd, uMsg, wParam, lParam);
     }
     return 0;
+}
+
+void WhiteBoardWin::ShowToolButton()
+{
+    RECT rect;
+    GetClientRect(m_hwnd,&rect);
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+    int buttonWidth = 100;
+    int buttonHeight = 30;
+    int spacing = 10;
+
+    // 计算按钮的位置
+    int totalWidth = buttonWidth * 3 + spacing * 2; // 三个按钮的宽度加上间距
+    int startX = (width - totalWidth) / 2; // 居中
+
+                                           // 设置按钮的位置
+
+    SetWindowPos(GetDlgItem(m_hwnd, ID_COLOR), NULL, startX, height - buttonHeight - 10, 0, 0, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(m_hwnd, ID_EDIT), NULL, startX + buttonWidth + spacing, height - buttonHeight - 10, 0, 0, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(m_hwnd, ID_CLEAR), NULL, startX + (buttonWidth + spacing) * 2, height - buttonHeight - 10, 0, 0, SWP_NOZORDER);
+
+    SetWindowPos(GetDlgItem(m_hwnd, ID_COLOR), NULL, startX, height - buttonHeight - 10, buttonWidth, buttonHeight, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(m_hwnd, ID_EDIT), NULL, startX + buttonWidth + spacing, height - buttonHeight - 10, buttonWidth, buttonHeight, SWP_NOZORDER);
+    SetWindowPos(GetDlgItem(m_hwnd, ID_CLEAR), NULL, startX + (buttonWidth + spacing) * 2, height - buttonHeight - 10, buttonWidth, buttonHeight, SWP_NOZORDER);
 }
 
 
@@ -158,15 +197,23 @@ void WhiteBoardWin::ShowColorDialog(COLORREF* color) {
 
 void WhiteBoardWin::CreateMainMenu()
 {
-    HMENU hMenu = CreateMenu();
-    HMENU hSubMenu = CreatePopupMenu();
+    toolButton[ID_COLOR] = CreateWindow(
+        L"BUTTON", L"选择颜色",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        0, 0, 100, 30,
+        m_hwnd, (HMENU)ID_COLOR, NULL, NULL);
 
-    AppendMenu(hSubMenu, MF_STRING, ID_COLOR, L"选择颜色");
-    AppendMenu(hSubMenu, MF_STRING, ID_ERASER, L"橡皮擦");
-    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSubMenu, L"工具");
-    AppendMenu(hSubMenu, MF_STRING, ID_CLEAR, L"清除");
+    toolButton[ID_EDIT] = CreateWindow(
+        L"BUTTON", L"橡皮擦",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        0, 0, 100, 30,
+        m_hwnd, (HMENU)ID_EDIT, NULL, NULL);
 
-    SetMenu(m_hwnd, hMenu);
+    toolButton[ID_CLEAR] = CreateWindow(
+        L"BUTTON", L"清屏",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+        0, 0, 100, 30,
+        m_hwnd, (HMENU)ID_CLEAR, NULL, NULL);
 }
 
 void WhiteBoardWin::EraseRectangle(HDC hdc,RECT rc)
@@ -233,6 +280,7 @@ void WhiteBoardWin::ReferceCanvas(const std::list<whiteboard::Path>& data)
     DeleteObject(hBitmap);
     DeleteDC(memDC);
     ReleaseDC(m_hwnd, hdc);
+
 }
 
 bool WhiteBoardWin::CheckPoint(POINT x)
