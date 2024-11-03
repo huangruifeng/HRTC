@@ -34,10 +34,14 @@ struct VideoFormat {
         YV12 = HRTC_FOURCC('Y', 'V', '1', '2'),
         MJPEG = HRTC_FOURCC('M', 'J', 'P', 'G'),
         NV12 = HRTC_FOURCC('N', 'V', '1', '2'),
+
+        //Encoder Data.
+        H264 = HRTC_FOURCC('H','2','6','4'),
     };
     Format format = Unknown;
     int width = 0;
     int height = 0;
+    bool key = false;
 };
 
 struct AudioFormat
@@ -117,9 +121,11 @@ public:
             m_data[i] = nullptr;
             m_lineSize[i] = 0;
         }
+        m_size = 0;
+        m_cap = 0;
     }
 
-    void Alloc(){
+    void Alloc(int cap = 0){
 
         if(m_mediaType == Audio){
 
@@ -134,31 +140,48 @@ public:
             case VideoFormat::YV12:
             case VideoFormat::NV12:
             case VideoFormat::MJPEG:
-                
                 newsize = width*height*3/2;
-                if (m_size < newsize) {
+                if (cap < newsize) {
+                    cap = newsize;
+                }
+                if (m_cap < cap) {
                     Delloc();
-                    m_size = newsize;
-                    m_data[0] = new uint8_t[m_size];
+                    m_cap = cap;
+                    m_data[0] = new uint8_t[m_cap];
                 }
                 m_data[1] = m_data[0] + width * height;
                 m_data[2] = m_data[1] + width * height / 4;
                 m_lineSize[0] = width;
                 m_lineSize[1] = width / 2;
                 m_lineSize[2] = width / 2;
+                m_size = newsize;
                 break;
             case VideoFormat::ARGB:
             case VideoFormat::ABGR:
                 newsize = width*height*4;
-                if (m_size < newsize) {
-                    Delloc();
-                    m_data[0] = new uint8_t[m_size];
+                if (cap < newsize) {
+                    cap = newsize;
                 }
-                m_lineSize[0] = width * height * 4;
+                if (m_cap < cap) {
+                    Delloc();
+                    m_cap = cap;
+                    m_data[0] = new uint8_t[m_cap];
+                }
+                m_lineSize[0] = newsize;
+                m_size = newsize;
                 break;
             case VideoFormat::IYUV: //I422
             case VideoFormat::YUY2:
                 //todo support I422;
+                break;
+            case VideoFormat::H264:
+                if (cap > m_cap) {
+                    Delloc();
+                    m_cap = cap;
+                    m_data[0] = new uint8_t[m_cap];
+                }
+                m_lineSize[0] = 0;
+                m_size = 0;
             default:
                 break;
             }
@@ -179,5 +202,7 @@ public:
     uint8_t *m_data[CHANNEL_SIZE];
     int m_lineSize[CHANNEL_SIZE];
     int m_size;
+    int m_cap;
+    int64_t m_time;
 };
 }
