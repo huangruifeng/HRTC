@@ -15,14 +15,26 @@
 
 namespace hrtc {
 
-    class IThread {
+    class Iparameter {
+    public:
+        virtual ~Iparameter() = default;
+
+    };
+
+    class IRtcCommon {
+    public:
+        virtual ~IRtcCommon() = default;
+        virtual std::shared_ptr<Iparameter> GetParmeter() { return nullptr; };
+    };
+        
+    class IThread : public IRtcCommon {
     public:
         virtual ~IThread() = default;
         virtual void BeginInvoke(const std::function<void()>&) = 0;
         virtual void Invoke(const std::function<void()>&) = 0;
     };
 
-    class INode {
+    class INode : public IRtcCommon{
     public:
         virtual ~INode() = default;
         virtual RtcResult Connect(INode* node) = 0;
@@ -44,11 +56,18 @@ namespace hrtc {
         virtual RtcResult Deinit() = 0;
     };
 
+    class IVideoEncoder : public INode {
+    public:
+        virtual ~IVideoEncoder() = default;
+        virtual RtcResult StartEncode() = 0;
+        virtual RtcResult StopEncode() = 0;
+    };
+
     struct DeviceInfo {
         std::string deviceId;
         std::string deviceName;
     };
-    class IVideoDeviceManager {
+    class IVideoDeviceManager : public IRtcCommon {
     public:
         virtual ~IVideoDeviceManager() = default;
         virtual std::vector<DeviceInfo> ListVideoDevice() = 0;
@@ -58,4 +77,5 @@ namespace hrtc {
     HRTC_API std::shared_ptr<IVideoCaptureSource> CreateVideoCaptureSource(const std::shared_ptr<IThread>& api = nullptr);
     HRTC_API std::shared_ptr<IVideoRenderSink> CreateVideoRenderSink(const std::shared_ptr<IThread>& api = nullptr);
     HRTC_API std::shared_ptr<IVideoDeviceManager> CreateVideoDeviceManager(const std::shared_ptr<IThread>& api = nullptr);
+    HRTC_API std::shared_ptr<IVideoEncoder> CreateVideoEncodeNode(const std::shared_ptr<IThread>& api = nullptr);
 }

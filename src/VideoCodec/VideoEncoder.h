@@ -8,7 +8,8 @@ namespace hrtc{
         virtual ~VideoEncoder(){}
 
         virtual bool Encode(const MediaInfo& input,MediaInfo& output) = 0;
+
+        static std::shared_ptr<VideoEncoder> CreateEncoder(const std::string& param);
     };
 
-    static std::shared_ptr<VideoEncoder> CreateEncoder(const std::string& param);
 }

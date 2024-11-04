@@ -11,9 +11,10 @@ hrtc::X264VideoEncoder::~X264VideoEncoder()
     }
 }
 
-hrtc::X264VideoEncoder::X264VideoEncoder()
+hrtc::X264VideoEncoder::X264VideoEncoder() :m_width(0), m_height(0),m_x264(nullptr)
 {
-   
+    memset(&m_encoderParam, 0, sizeof(m_encoderParam));
+    memset(&m_x264Picture, 0, sizeof(x264_picture_t));
 }
 
 bool hrtc::X264VideoEncoder::Encode(const MediaInfo& input, MediaInfo& output)
@@ -29,7 +30,7 @@ bool hrtc::X264VideoEncoder::Encode(const MediaInfo& input, MediaInfo& output)
         }
     }
 
-    libyuv::ConvertToI420(input.GetData(0), input.GetSize(),
+    libyuv::ConvertToI420(input.m_data[0], input.m_size,
         m_x264Picture.img.plane[0], m_x264Picture.img.i_stride[0],
         m_x264Picture.img.plane[1], m_x264Picture.img.i_stride[1],
         m_x264Picture.img.plane[2], m_x264Picture.img.i_stride[2],
@@ -85,7 +86,7 @@ bool hrtc::X264VideoEncoder::Encode(const MediaInfo& input, MediaInfo& output)
     output.SetMediaFormat(f);
     output.Alloc(dataSize);
     output.m_time = out.i_pts;
-
+    output.m_size = dataSize;
     output.m_lineSize[0] = dataSize;
     uint8_t* data = output.m_data[0];
     if (isKey && spsIndex != -1 && ppsIndex != -1) {
@@ -149,14 +150,14 @@ bool hrtc::X264VideoEncoder::InitCodec()
     m_encoderParam.b_repeat_headers = 1;
 
     //码率控制 单位kbps CQP,CRF,ABR
-    //m_encoderParam.rc.i_rc_method = X264_RC_ABR;
-    //m_encoderParam.rc.f_rf_constant = 0;
-    //m_encoderParam.rc.i_bitrate = 1000;
-    m_encoderParam.rc.f_rf_constant = (float)25;
-    m_encoderParam.rc.i_rc_method = X264_RC_CRF;
-    m_encoderParam.rc.i_bitrate = 0;
+    m_encoderParam.rc.i_rc_method = X264_RC_ABR;
+    m_encoderParam.rc.f_rf_constant = 0;
+    m_encoderParam.rc.i_bitrate = 1000;
+    //m_encoderParam.rc.f_rf_constant = (float)25;
+    //m_encoderParam.rc.i_rc_method = X264_RC_CRF;
+    //m_encoderParam.rc.i_bitrate = 0;
     //最大码率
-    //m_encoderParam.rc.i_vbv_max_bitrate = 100000;
+    m_encoderParam.rc.i_vbv_max_bitrate = 100000;
     
     //码率缓冲区
     m_encoderParam.rc.i_vbv_buffer_size = 15000;
@@ -174,7 +175,7 @@ bool hrtc::X264VideoEncoder::InitCodec()
 
     // open
     m_x264 = x264_encoder_open(&m_encoderParam);
-    if (m_x264) {
+    if (!m_x264) {
         return false;
     }
 

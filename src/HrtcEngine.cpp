@@ -1,6 +1,7 @@
 #include "Headers/HrtcEngine.h"
 #include "VideoNode/VideoSinkNode.h"
 #include "VideoNode/VideoSourceNode.h"
+#include "VideoNode/VideoEncodeNode.h"
 #include "Base/Thread/DispatchQueue.h"
 using namespace hrtc;
 
@@ -84,4 +85,9 @@ std::shared_ptr<IThread> hrtc::CreateThread(const std::string& name) {
 
 std::shared_ptr<IVideoDeviceManager> hrtc::CreateVideoDeviceManager(const std::shared_ptr<IThread>& apiThread) {
     return CreateWithThread<VideoDeviceManager>(apiThread);
+}
+
+
+std::shared_ptr<IVideoEncoder> hrtc::CreateVideoEncodeNode(const std::shared_ptr<IThread>& apiThread ) {
+    return CreateWithThread<VideoEncodeNode>(apiThread);
 }
