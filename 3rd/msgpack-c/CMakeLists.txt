@@ -35,7 +35,7 @@ OPTION (MSGPACK_USE_X3_PARSE            "Use Boost X3 parse"                   O
 OPTION (MSGPACK_BUILD_TESTS             "Build tests"                          OFF)
 OPTION (MSGPACK_BUILD_DOCS              "Build Doxygen documentation"          OFF)
 OPTION (MSGPACK_FUZZ_REGRESSION         "Enable regression testing"            OFF)
-OPTION (MSGPACK_BUILD_EXAMPLES          "Build msgpack examples"               OFF)
+OPTION (MSGPACK_BUILD_EXAMPLES          "Build msgpack examples"               ON)
 OPTION (MSGPACK_GEN_COVERAGE            "Generate coverage report"             OFF)
 OPTION (MSGPACK_USE_STATIC_BOOST        "Statically link with boost libraries" OFF)
 OPTION (MSGPACK_CHAR_SIGN               "Char sign to use (signed or unsigned)")

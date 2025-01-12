@@ -4,6 +4,7 @@ add_subdirectory(Base)
 add_subdirectory(VideoCapture)
 add_subdirectory(VideoRender)
 add_subdirectory(VideoCodec)
+add_subdirectory(Transport)
 
 file(GLOB RTC_NODE_SRC  Node/*.h Node/*.cpp)
 file(GLOB RTC_PIN_SRC  Pin/*.h Pin/*.cpp)
