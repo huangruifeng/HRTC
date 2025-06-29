@@ -11,12 +11,15 @@
 #include <Base/base.h>
 
 namespace hrtc{
+
+    class TcpConnection;
+
     class TcpConnectionObserver {
     public:
         virtual ~TcpConnectionObserver() = default;
-        virtual void onDataReceived(const std::string& data) = 0;
-        virtual void onConnectionClosed() = 0;
-        virtual void onConnectionEstablished() = 0;
+        virtual void onDataReceived(TcpConnection*,const std::string& data) = 0;
+        virtual void onConnectionClosed(TcpConnection*) = 0;
+        virtual void onConnectionEstablished(TcpConnection*) = 0;
     };
 
 	class TcpConnection {
@@ -24,9 +27,8 @@ namespace hrtc{
         TcpConnection(uv_loop_t* loop)
             : loop_(loop), handle_(std::make_unique<uv_tcp_t>()), write_req_(std::make_unique<uv_write_t>()),
             read_buffer_(nullptr), read_buffer_size_(0), is_closing_(false) {
-            uv_tcp_init(loop_, handle_.get());
-            uv_read_start((uv_stream_t*)handle_.get(), allocBuffer, onRead);
             handle_->data = this;
+            uv_tcp_init(loop_, handle_.get());
         }
 
         int addObserver(TcpConnectionObserver* observer) {
@@ -58,8 +60,9 @@ namespace hrtc{
             int r = uv_accept(server, (uv_stream_t*)handle_.get());
             if (r == 0) {
                 observers_.Foreach([&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                    ptr->onConnectionEstablished();
+                    ptr->onConnectionEstablished(this);
                 });
+                uv_read_start((uv_stream_t*)handle_.get(), allocBuffer, onRead);
             }
             else {
                 LOG_ERROR("TcpConnection", "Accept error : " << uv_strerror(r));
@@ -113,7 +116,7 @@ namespace hrtc{
             if (nread > 0) {
                 connection->observers_.Foreach(
                     [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                        ptr->onDataReceived(std::string(buf->base, nread));
+                        ptr->onDataReceived(connection,std::string(buf->base, nread));
                     });
             }
             else if (nread == UV_EOF) {
@@ -125,7 +128,7 @@ namespace hrtc{
                 LOG_ERROR("TcpConnection","Read error : " << uv_strerror(nread))
                 connection->close();
             }
-            delete[] buf->base;
+           // delete[] buf->base;
         }
 
         static void onWrite(uv_write_t* req, int status) {
@@ -147,8 +150,11 @@ namespace hrtc{
             if (status == 0) {
                 connection->observers_.Foreach(
                     [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                        ptr->onConnectionEstablished();
+                        ptr->onConnectionEstablished(connection);
                     });
+
+                uv_read_start((uv_stream_t*)req->handle, allocBuffer, onRead);
+
             }
             else {
                 LOG_ERROR("TcpConnection","Connect error: " << uv_strerror(status));
@@ -165,9 +171,12 @@ namespace hrtc{
             TcpConnection* connection = static_cast<TcpConnection*>(handle->data);
             connection->observers_.Foreach(
                 [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                    ptr->onConnectionClosed();
+                    ptr->onConnectionClosed(connection);
                 });
-            delete[] connection->read_buffer_;
+            if (connection->read_buffer_) {
+                delete[] connection->read_buffer_;
+                connection->read_buffer_ = nullptr;
+            }
             // 注意：不要在这里删除connection，因为它可能是由shared_ptr管理的
         }
 

@@ -1,6 +1,7 @@
 add_subdirectory(3rd/libyuv)
 include_directories(3rd/libyuv/include)
 
+SET(MSGPACK_BUILD_EXAMPLES OFF)
 add_subdirectory(3rd/msgpack-c)
 include_directories(3rd/msgpack-c/include)
 

@@ -11,16 +11,16 @@ namespace hrtc{
 		void disconnect();
 		bool isConnected() const{ return connected_; }
 		void sendMessage(const std::string& message);
+		void run();
 	private:
 		uv_loop_t* loop_;
 		std::thread thread_;
 		uv_timer_t timer_req_;
 		std::unique_ptr<TcpConnection> connection_;
 		bool connected_ = false;
-		void run();
 		void stop();
-		virtual void onDataReceived(const std::string& data) override;
-		virtual void onConnectionClosed() override;
-		virtual void onConnectionEstablished() override;
+		virtual void onDataReceived(TcpConnection*,const std::string& data) override;
+		virtual void onConnectionClosed(TcpConnection*) override;
+		virtual void onConnectionEstablished(TcpConnection*) override;
 	};
 }

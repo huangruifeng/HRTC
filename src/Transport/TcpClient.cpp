@@ -50,17 +50,17 @@ void hrtc::TcpClient::stop()
     }
 }
 
-void hrtc::TcpClient::onDataReceived(const std::string& data)
+void hrtc::TcpClient::onDataReceived(TcpConnection*,const std::string& data)
 {
 
 }
 
-void hrtc::TcpClient::onConnectionClosed()
+void hrtc::TcpClient::onConnectionClosed(TcpConnection*)
 {
     connected_ = false;
 }
 
-void hrtc::TcpClient::onConnectionEstablished()
+void hrtc::TcpClient::onConnectionEstablished(TcpConnection*)
 {
     connected_ = true;
 }
