@@ -23,9 +23,9 @@ void on_async(uv_async_t* handle) {
 }
 
 void hrtc::TcpServer:: onDataReceived(hrtc::TcpConnection*connection,const std::string& data) {
-	std::cout << "data received: " << data.size() << std::endl;
+	std::cout << "client: " << data << std::endl;
 	connection->write("HTTP/1.0 200 OK\r\n\r\n\r\n<html><body>Hello world</body></html>");
-	connection->close();
+    connection->close();
 }
 void hrtc::TcpServer::onConnectionClosed(hrtc::TcpConnection* connection) {
 	std::cout << "connection closed" << std::endl;
@@ -72,8 +72,9 @@ void hrtc::TcpServer::async_run(int port)
 
 void hrtc::TcpServer::stop()
 {
+    uv_stop(loop_.get());
 	uv_close((uv_handle_t*)server_.get(), NULL);
-	uv_stop(loop_.get());
+    uv_close((uv_handle_t*)task_.get(),NULL);
 	if (thread_.joinable()) {
 		thread_.join();
 	}

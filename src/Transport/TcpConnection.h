@@ -25,8 +25,10 @@ namespace hrtc{
 	class TcpConnection {
     public:
         TcpConnection(uv_loop_t* loop)
-            : loop_(loop), handle_(std::make_unique<uv_tcp_t>()), write_req_(std::make_unique<uv_write_t>()),
-            read_buffer_(nullptr), read_buffer_size_(0), is_closing_(false) {
+            : loop_(loop)
+            , handle_(std::make_unique<uv_tcp_t>())
+            , write_req_(std::make_unique<uv_write_t>())
+            ,is_closing_(false) {
             handle_->data = this;
             uv_tcp_init(loop_, handle_.get());
         }
@@ -102,13 +104,9 @@ namespace hrtc{
 
         static void allocBuffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
             TcpConnection* connection = static_cast<TcpConnection*>(handle->data);
-            if (connection->read_buffer_) {
-                delete[] connection->read_buffer_;
-            }
-            connection->read_buffer_ = new char[suggested_size];
-            connection->read_buffer_size_ = suggested_size;
-            buf->base = connection->read_buffer_;
-            buf->len = connection->read_buffer_size_;
+            connection->read_buffer_.resize(suggested_size);
+            buf->base = connection->read_buffer_.data();
+            buf->len = connection->read_buffer_.size();
         }
 
         static void onRead(uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
@@ -121,6 +119,7 @@ namespace hrtc{
             }
             else if (nread == UV_EOF) {
                 // 对端关闭连接
+                uv_read_stop(stream);
                 connection->close();
             }
             else {
@@ -128,7 +127,6 @@ namespace hrtc{
                 LOG_ERROR("TcpConnection","Read error : " << uv_strerror(nread))
                 connection->close();
             }
-           // delete[] buf->base;
         }
 
         static void onWrite(uv_write_t* req, int status) {
@@ -152,7 +150,7 @@ namespace hrtc{
                     [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
                         ptr->onConnectionEstablished(connection);
                     });
-
+                connection->is_closing_ = false;
                 uv_read_start((uv_stream_t*)req->handle, allocBuffer, onRead);
 
             }
@@ -173,16 +171,12 @@ namespace hrtc{
                 [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
                     ptr->onConnectionClosed(connection);
                 });
-            if (connection->read_buffer_) {
-                delete[] connection->read_buffer_;
-                connection->read_buffer_ = nullptr;
-            }
             // 注意：不要在这里删除connection，因为它可能是由shared_ptr管理的
         }
 
         void processWriteQueue() {
             if (!write_queue_.empty() && !write_in_progress_) {
-                std::string data = std::move(write_queue_.front());
+                std::string& data = write_queue_.front();
                 uv_buf_t buf = uv_buf_init(const_cast<char*>(data.c_str()), data.size());
                 uv_write(write_req_.get(), (uv_stream_t*)handle_.get(), &buf, 1, onWrite);
                 write_req_->data = this;
@@ -197,10 +191,9 @@ namespace hrtc{
         std::unique_ptr<uv_read_t> read_req_;
         uv_connect_t connect_req_;
         uv_timer_t timer_req_;
-        std::atomic<bool> has_timer_;;
+        std::atomic<bool> has_timer_;
         struct sockaddr_in peer_addr_;
-        char* read_buffer_;
-        size_t read_buffer_size_;
+        std::vector<char> read_buffer_;
         hrtc::Collections<TcpConnectionObserver,hrtc::RawPointer,hrtc::MultiThreaded> observers_;
         std::mutex lock_;
         std::deque<std::string> write_queue_;

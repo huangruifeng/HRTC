@@ -20,7 +20,7 @@ int main() {
         std::this_thread::sleep_for(std::chrono::seconds(2));
     }).join();
     
-    std::this_thread::sleep_for(std::chrono::seconds(20));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
     server.stop();
     return 0;
 }

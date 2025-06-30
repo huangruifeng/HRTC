@@ -6,4 +6,4 @@ add_library(${target_name} STATIC ${TRANSPORT_SOURCE})
 target_link_libraries(${target_name} libuv::libuv)
 
 add_executable(transport_demo test.cpp)
-target_link_libraries(transport_demo ${target_name})
+target_link_libraries(transport_demo hrtc_base ${target_name})
