@@ -17,9 +17,9 @@ namespace hrtc{
     class TcpConnectionObserver {
     public:
         virtual ~TcpConnectionObserver() = default;
-        virtual void onDataReceived(TcpConnection*,const std::string& data) = 0;
-        virtual void onConnectionClosed(TcpConnection*) = 0;
-        virtual void onConnectionEstablished(TcpConnection*) = 0;
+        virtual void on_data_received(TcpConnection*,const std::string& data) = 0;
+        virtual void on_connection_closed(TcpConnection*) = 0;
+        virtual void on_connection_connected(TcpConnection*) = 0;
     };
 
 	class TcpConnection {
@@ -62,7 +62,7 @@ namespace hrtc{
             int r = uv_accept(server, (uv_stream_t*)handle_.get());
             if (r == 0) {
                 observers_.Foreach([&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                    ptr->onConnectionEstablished(this);
+                    ptr->on_connection_connected(this);
                 });
                 uv_read_start((uv_stream_t*)handle_.get(), allocBuffer, onRead);
             }
@@ -114,7 +114,7 @@ namespace hrtc{
             if (nread > 0) {
                 connection->observers_.Foreach(
                     [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                        ptr->onDataReceived(connection,std::string(buf->base, nread));
+                        ptr->on_data_received(connection,std::string(buf->base, nread));
                     });
             }
             else if (nread == UV_EOF) {
@@ -148,7 +148,7 @@ namespace hrtc{
             if (status == 0) {
                 connection->observers_.Foreach(
                     [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                        ptr->onConnectionEstablished(connection);
+                        ptr->on_connection_connected(connection);
                     });
                 connection->is_closing_ = false;
                 uv_read_start((uv_stream_t*)req->handle, allocBuffer, onRead);
@@ -169,7 +169,7 @@ namespace hrtc{
             TcpConnection* connection = static_cast<TcpConnection*>(handle->data);
             connection->observers_.Foreach(
                 [&](Collections<TcpConnectionObserver, RawPointer, hrtc::MultiThreaded>::PtrType ptr) {
-                    ptr->onConnectionClosed(connection);
+                    ptr->on_connection_closed(connection);
                 });
             // 注意：不要在这里删除connection，因为它可能是由shared_ptr管理的
         }

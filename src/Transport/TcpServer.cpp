@@ -4,54 +4,51 @@
 
 struct LoopTask {
 	virtual ~LoopTask() = default;
-	virtual void Run() = 0;
+	virtual void run() = 0;
 };
 
 struct FreeConnectionTask:public LoopTask {
-	FreeConnectionTask(const std::shared_ptr<hrtc::TcpConnection>& c) :connection(c) {}
-	virtual void Run() override {
-		connection = nullptr;
+	FreeConnectionTask(hrtc::TcpServer* s, const std::shared_ptr<hrtc::TcpConnection>& c) :server(s),connection(c) {}
+	virtual void run() override {
+        if (server) {
+            server->close_connection(connection);
+        }
 	}
 private:
-	std::shared_ptr<hrtc::TcpConnection> connection;
+    hrtc::TcpServer* server;
+    std::shared_ptr<hrtc::TcpConnection> connection;
 };
 
 void on_async(uv_async_t* handle) {
 	LoopTask* data = (LoopTask*)handle->data;
-	data->Run();
+	data->run();
 	delete data;
 }
 
-void hrtc::TcpServer:: onDataReceived(hrtc::TcpConnection*connection,const std::string& data) {
-	std::cout << "client: " << data << std::endl;
-	connection->write("HTTP/1.0 200 OK\r\n\r\n\r\n<html><body>Hello world</body></html>");
-    connection->close();
-}
-void hrtc::TcpServer::onConnectionClosed(hrtc::TcpConnection* connection) {
-	std::cout << "connection closed" << std::endl;
-	for (auto it = connections_.begin(); it != connections_.end(); ++it) {
-		if ((*it).get() == connection) {
-			FreeConnectionTask* task = new FreeConnectionTask(*it);
-			task_->data = task;
-			uv_async_send(task_.get());
-			connections_.erase(it);
-			break;
-		}
-	}
-}
-void hrtc::TcpServer:: onConnectionEstablished(hrtc::TcpConnection* connection) {
-	std::cout << "connection established" << std::endl;
+
+void hrtc::TcpServer::on_new_connection(const std::shared_ptr<TcpConnection>& connection)
+{
+    connections_.AddElement(connection);
+    observers_.Foreach([&](auto ptr) {
+        ptr->on_new_connection(connection);
+    });
 }
 
-void onNewConnection(uv_stream_t* server, int status) {
+void hrtc::TcpServer::close_connection(const std::shared_ptr<TcpConnection>& conn)
+{
+    FreeConnectionTask* task = new FreeConnectionTask(this,conn);
+    task_->data = task;
+    uv_async_send(task_.get());
+}
+
+void on_new_connection(uv_stream_t* server, int status) {
 	if (status < 0) {
 		return;
 	}
 	hrtc::TcpServer* tcp = (hrtc::TcpServer*)server->data;
 	std::shared_ptr<hrtc::TcpConnection> connection = std::make_shared<hrtc::TcpConnection>(tcp->get_loop());
-	connection->addObserver(tcp);
+    tcp->on_new_connection(connection);
 	connection->accept(server);
-	tcp->connections_.push_back(connection);
 }
 
 hrtc::TcpServer::TcpServer():task_(new uv_async_t),loop_(new uv_loop_t),port_(0), server_(new uv_tcp_t)
@@ -96,7 +93,7 @@ int hrtc::TcpServer::sync_run(int port)
 		std::cout << "Bind error" << std::endl;
 		return -1;
 	}
-	if(uv_listen((uv_stream_t*)server_.get(), 128, onNewConnection)< 0)
+	if(uv_listen((uv_stream_t*)server_.get(), 128, ::on_new_connection)< 0)
 	{
 		std::cout << "Listen error "  << std::endl;
 		return -1;

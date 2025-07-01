@@ -28,8 +28,8 @@ namespace hrtc{
 
         void run();
 		void stop();
-		virtual void onDataReceived(TcpConnection*,const std::string& data) override;
-		virtual void onConnectionClosed(TcpConnection*) override;
-		virtual void onConnectionEstablished(TcpConnection*) override;
+		virtual void on_data_received(TcpConnection*,const std::string& data) override;
+		virtual void on_connection_closed(TcpConnection*) override;
+		virtual void on_connection_connected(TcpConnection*) override;
 	};
 }

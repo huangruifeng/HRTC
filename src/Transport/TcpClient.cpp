@@ -68,17 +68,17 @@ void hrtc::TcpClient::stop()
     }
 }
 
-void hrtc::TcpClient::onDataReceived(TcpConnection*,const std::string& data)
+void hrtc::TcpClient::on_data_received(TcpConnection*,const std::string& data)
 {
     std::cout << "Server: " << data << std::endl;
 }
 
-void hrtc::TcpClient::onConnectionClosed(TcpConnection* c)
+void hrtc::TcpClient::on_connection_closed(TcpConnection* c)
 {
     disconnect();
 }
 
-void hrtc::TcpClient::onConnectionEstablished(TcpConnection*)
+void hrtc::TcpClient::on_connection_connected(TcpConnection*)
 {
     state_ = ConnectionState::Connected;
 }
