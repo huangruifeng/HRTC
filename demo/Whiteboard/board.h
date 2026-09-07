@@ -2,7 +2,7 @@
 #include "../BaseWindow.h"
 #include <windows.h>
 #include <commdlg.h>
-#include "board_define.h"
+#include "Whiteboard/whiteboard.h"
 #include "Headers/HrtcEngine.h"
 #include "Base/Event.h"
 class BoardData {
@@ -26,7 +26,7 @@ public:
     virtual void OnEraserEndComplete() = 0;
 protected:
     whiteboard::Page m_page;
-    whiteboard::Path m_currentPath;
+    whiteboard::Stroke m_currentStroke;
     COLORREF m_currentColor = RGB(255, 255, 255);
     int m_penWidth = 2;
     std::shared_ptr<hrtc::IThread> m_dataThread;
@@ -51,7 +51,7 @@ public:
     void SetBackgroundColor(HDC hdc);
     virtual void OnEraserEndComplete() override;
 
-    void ReferceCanvas(const std::list<whiteboard::Path>& data);
+    void ReferceCanvas(const whiteboard::Page& data);
 
     bool CheckPoint(POINT x);
 

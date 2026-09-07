@@ -2,7 +2,7 @@
 
 #define WM_REFERCE_CANVAS (WM_USER + 1)
 #define WM_SHOW_TOOL (WM_USER + 2)
-const int ERASER_WIDTH = 20; // ÏðÆ¤²Á´óÐ¡
+const int ERASER_WIDTH = 20; // ï¿½ï¿½Æ¤ï¿½ï¿½ï¿½ï¿½Ð¡
 const int ERASER_HEIGHT = 30;
 LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
@@ -36,7 +36,7 @@ LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
         {
             if (lParam) {
 
-                ReferceCanvas(((whiteboard::Page*)wParam)->paths);
+                ReferceCanvas(*(whiteboard::Page*)wParam);
                 hrtc::HEvent* e = (hrtc::HEvent*)lParam;
                 e->set();
                 ShowToolButton();
@@ -101,10 +101,10 @@ LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
         else if (LOWORD(wParam) == ID_EDIT) {
             eraserMode = !eraserMode;
             if (eraserMode) {
-                SetWindowText(toolButton[ID_EDIT], L"±Ê");
+                SetWindowText(toolButton[ID_EDIT], L"ï¿½ï¿½");
             }
             else {
-                SetWindowText(toolButton[ID_EDIT], L"ÏðÆ¤²Á");
+                SetWindowText(toolButton[ID_EDIT], L"ï¿½ï¿½Æ¤ï¿½ï¿½");
             }
         }
         else if (LOWORD(wParam) == ID_CLEAR) {
@@ -126,7 +126,7 @@ LRESULT WhiteBoardWin::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
         
         whiteboard::Page page;
         GetCurrentPage(page);
-        ReferceCanvas(page.paths);
+        ReferceCanvas(page);
         EndPaint(m_hwnd, &ps);
         //SendMessage(m_hwnd, WM_SHOW_TOOL, 0,0);
         break;
@@ -157,11 +157,11 @@ void WhiteBoardWin::ShowToolButton()
     int buttonHeight = 30;
     int spacing = 10;
 
-    // ¼ÆËã°´Å¥µÄÎ»ÖÃ
-    int totalWidth = buttonWidth * 3 + spacing * 2; // Èý¸ö°´Å¥µÄ¿í¶È¼ÓÉÏ¼ä¾à
-    int startX = (width - totalWidth) / 2; // ¾ÓÖÐ
+    // ï¿½ï¿½ï¿½ã°´Å¥ï¿½ï¿½Î»ï¿½ï¿½
+    int totalWidth = buttonWidth * 3 + spacing * 2; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Å¥ï¿½Ä¿ï¿½ï¿½È¼ï¿½ï¿½Ï¼ï¿½ï¿½
+    int startX = (width - totalWidth) / 2; // ï¿½ï¿½ï¿½ï¿½
 
-                                           // ÉèÖÃ°´Å¥µÄÎ»ÖÃ
+                                           // ï¿½ï¿½ï¿½Ã°ï¿½Å¥ï¿½ï¿½Î»ï¿½ï¿½
 
     SetWindowPos(GetDlgItem(m_hwnd, ID_COLOR), NULL, startX, height - buttonHeight - 10, 0, 0, SWP_NOZORDER);
     SetWindowPos(GetDlgItem(m_hwnd, ID_EDIT), NULL, startX + buttonWidth + spacing, height - buttonHeight - 10, 0, 0, SWP_NOZORDER);
@@ -198,19 +198,19 @@ void WhiteBoardWin::ShowColorDialog(COLORREF* color) {
 void WhiteBoardWin::CreateMainMenu()
 {
     toolButton[ID_COLOR] = CreateWindow(
-        L"BUTTON", L"Ñ¡ÔñÑÕÉ«",
+        L"BUTTON", L"Ñ¡ï¿½ï¿½ï¿½ï¿½É«",
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         0, 0, 100, 30,
         m_hwnd, (HMENU)ID_COLOR, NULL, NULL);
 
     toolButton[ID_EDIT] = CreateWindow(
-        L"BUTTON", L"ÏðÆ¤²Á",
+        L"BUTTON", L"ï¿½ï¿½Æ¤ï¿½ï¿½",
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         0, 0, 100, 30,
         m_hwnd, (HMENU)ID_EDIT, NULL, NULL);
 
     toolButton[ID_CLEAR] = CreateWindow(
-        L"BUTTON", L"ÇåÆÁ",
+        L"BUTTON", L"ï¿½ï¿½ï¿½ï¿½",
         WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
         0, 0, 100, 30,
         m_hwnd, (HMENU)ID_CLEAR, NULL, NULL);
@@ -218,8 +218,8 @@ void WhiteBoardWin::CreateMainMenu()
 
 void WhiteBoardWin::EraseRectangle(HDC hdc,RECT rc)
 {
-    HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50)); // »ÒÉ«±³¾°
-    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255)); // °×É«±ß¿ò
+    HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50)); // ï¿½ï¿½É«ï¿½ï¿½ï¿½ï¿½
+    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255)); // ï¿½ï¿½É«ï¿½ß¿ï¿½
     SelectObject(hdc, hBrush);
     SelectObject(hdc, hPen);
     Rectangle(hdc,rc.left,rc.top, rc.right, rc.bottom);
@@ -229,7 +229,7 @@ void WhiteBoardWin::EraseRectangle(HDC hdc,RECT rc)
 
 //void WhiteBoardWin::DrawEraser(HDC hdc, POINT point)
 //{
-//    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255)); // °×É«±ß¿ò
+//    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255)); // ï¿½ï¿½É«ï¿½ß¿ï¿½
 //    SelectObject(hdc, hPen);
 //
 //    Rectangle(hdc, point.x - ERASER_WIDTH / 2, point.y - ERASER_HEIGHT / 2,
@@ -242,7 +242,7 @@ void WhiteBoardWin::SetBackgroundColor(HDC hdc)
 {
     RECT rect;
     GetClientRect(m_hwnd, &rect);
-    HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50)); // »ÒÉ«ºÚ°åÉ«
+    HBRUSH hBrush = CreateSolidBrush(RGB(50, 50, 50)); // ï¿½ï¿½É«ï¿½Ú°ï¿½É«
     FillRect(hdc, &rect, hBrush);
     DeleteObject(hBrush);
 }
@@ -254,7 +254,7 @@ void WhiteBoardWin::OnEraserEndComplete()
     waitUiThreadEvent.Wait();
 }
 
-void WhiteBoardWin::ReferceCanvas(const std::list<whiteboard::Path>& data)
+void WhiteBoardWin::ReferceCanvas(const whiteboard::Page& data)
 {
     HDC hdc = GetDC(m_hwnd);
     SetBackgroundColor(hdc);
@@ -264,13 +264,18 @@ void WhiteBoardWin::ReferceCanvas(const std::list<whiteboard::Path>& data)
     HBITMAP hBitmap = CreateCompatibleBitmap(hdc, rect.right-rect.left, rect.bottom-rect.top);
     SelectObject(memDC, hBitmap);
     SetBackgroundColor(memDC);
-    for (auto& path : data) {
-        HPEN hPen = CreatePen(PS_SOLID, path.width, path.color);
+    for (auto& el : data.elements) {
+        auto* stroke = dynamic_cast<const whiteboard::Stroke*>(el.get());
+        if (!stroke)
+            continue;
+        HPEN hPen = CreatePen(PS_SOLID, stroke->width, stroke->color);
         SelectObject(memDC, hPen);
 
-        for (int i = 0; i < path.points.size() - 1; i++) {
-            MoveToEx(memDC, path.points[i].x, path.points[i].y, NULL);
-            LineTo(memDC, path.points[i+1].x, path.points[i+1].y);
+        for (int i = 0; i < stroke->points.size() - 1; i++) {
+            auto p0 = data.transform.WorldToScreen(stroke->points[i]);
+            auto p1 = data.transform.WorldToScreen(stroke->points[i + 1]);
+            MoveToEx(memDC, p0.x, p0.y, NULL);
+            LineTo(memDC, p1.x, p1.y);
         }
         DeleteObject(hPen);
     }
@@ -297,25 +302,25 @@ bool WhiteBoardWin::CheckPoint(POINT x)
 void BoardData::OnPenBegin(const whiteboard::Point& p, int sessionId)
 {
     m_dataThread->BeginInvoke([this,p]() {
-        m_currentPath.Reset();
-        m_currentPath.color = m_currentColor;
-        m_currentPath.width = m_penWidth;
-        m_currentPath.Append(p);
+        m_currentStroke.Reset();
+        m_currentStroke.color = m_currentColor;
+        m_currentStroke.width = m_penWidth;
+        m_currentStroke.Append(p);
     });
 }
 
 void BoardData::OnPenMove(const whiteboard::Point& p, int sessionId)
 {
     m_dataThread->BeginInvoke([this,p]() {
-        m_currentPath.Append(p);
+        m_currentStroke.Append(p);
     });
 }
 
 void BoardData::OnPenEnd(const whiteboard::Point& p, int sessionId)
 {
     m_dataThread->BeginInvoke([this,p]() {
-        m_currentPath.Append(p);
-        m_page.Append(m_currentPath);
+        m_currentStroke.Append(p);
+        m_page.Append(m_currentStroke);
     });
 }
 
