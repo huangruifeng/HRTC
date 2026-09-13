@@ -29,6 +29,44 @@ void Page::Clear()
     elements.clear();
 }
 
+bool Page::UpdateStroke(const std::string& id, const std::vector<Point>& points)
+{
+    for (auto& e : elements)
+    {
+        if (e->id != id)
+            continue;
+        auto* stroke = dynamic_cast<Stroke*>(e.get());
+        if (!stroke)
+            return false;
+        stroke->points = points;
+        stroke->rawPoints = points;
+        stroke->bounding = BoundaryRect(Rect(0, 0, 0, 0));
+        for (const auto& p : points)
+            stroke->bounding.Update(p.x, p.y);
+        return true;
+    }
+    return false;
+}
+
+std::shared_ptr<Page> Page::Clone() const
+{
+    auto page = std::make_shared<Page>();
+    page->pageId = pageId;
+    page->transform = transform;
+    page->enableEraserInsert = enableEraserInsert;
+    page->eraserSessionId = eraserSessionId;
+    page->insertInstance = insertInstance;
+    for (const auto& e : elements)
+    {
+        // 元素逐个克隆：Stroke 深拷贝点集；未知类型保持共享引用（防御）
+        if (auto* stroke = dynamic_cast<const Stroke*>(e.get()))
+            page->elements.push_back(std::make_shared<Stroke>(*stroke));
+        else
+            page->elements.push_back(e);
+    }
+    return page;
+}
+
 void Page::EnableEraserInsert(bool enable)
 {
     eraserSessionId = -1;
@@ -126,6 +164,7 @@ EraserResult Page::Eraser(const Rect& rc)
                 for (size_t i = 0; i + 1 < partPoints.size(); i += 2)
                 {
                     auto newPath = std::make_shared<Stroke>();
+                    newPath->Reset();  // 分配唯一 id，保证 UI 增量按 key 精确删/加
                     newPath->color = stroke->color;
                     newPath->width = stroke->width;
 
@@ -174,6 +213,7 @@ EraserResult Page::Eraser(const Rect& rc)
             if (!endConatain)
             {
                 auto newPath = std::make_shared<Stroke>();
+                newPath->Reset();  // 分配唯一 id，保证 UI 增量按 key 精确删/加
                 newPath->color = stroke->color;
                 newPath->width = stroke->width;
                 auto oBegin = *partPoints.rbegin();

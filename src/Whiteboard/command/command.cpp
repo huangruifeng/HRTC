@@ -3,6 +3,10 @@
 #include "Whiteboard/command/eraser_commands.h"
 #include "Whiteboard/command/element_commands.h"
 #include "Whiteboard/command/full_sync_command.h"
+#include "Whiteboard/command/transform_commands.h"
+#include "Whiteboard/command/page_commands.h"
+#include "Whiteboard/command/undo_redo_commands.h"
+#include "Whiteboard/command/preview_commands.h"
 #include <map>
 
 namespace whiteboard {
@@ -20,7 +24,16 @@ std::map<std::string, CommandFactory>& Factories()
         { "EraserEnd",     []() -> std::shared_ptr<Command> { return std::make_shared<EraserEnd>(); } },
         { "ElementAdd",    []() -> std::shared_ptr<Command> { return std::make_shared<ElementAdd>(); } },
         { "ElementRemove", []() -> std::shared_ptr<Command> { return std::make_shared<ElementRemove>(); } },
+        { "StrokeUpdate",  []() -> std::shared_ptr<Command> { return std::make_shared<StrokeUpdate>(); } },
+        { "PageCreate",    []() -> std::shared_ptr<Command> { return std::make_shared<PageCreate>(); } },
+        { "PageSelect",    []() -> std::shared_ptr<Command> { return std::make_shared<PageSelect>(); } },
+        { "PageDelete",    []() -> std::shared_ptr<Command> { return std::make_shared<PageDelete>(); } },
+        { "PageClear",     []() -> std::shared_ptr<Command> { return std::make_shared<PageClear>(); } },
+        { "Undo",          []() -> std::shared_ptr<Command> { return std::make_shared<Undo>(); } },
+        { "Redo",          []() -> std::shared_ptr<Command> { return std::make_shared<Redo>(); } },
         { "FullSync",      []() -> std::shared_ptr<Command> { return std::make_shared<FullSync>(); } },
+        { "LassoPreview",     []() -> std::shared_ptr<Command> { return std::make_shared<LassoPreview>(); } },
+        { "SelectionPreview", []() -> std::shared_ptr<Command> { return std::make_shared<SelectionPreview>(); } },
     };
     return factories;
 }

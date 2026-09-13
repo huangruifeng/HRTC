@@ -25,6 +25,12 @@ public:
     void Append(const Stroke& s);          // convenience: wraps via make_shared<Stroke>(s)
     void Delete(const std::string& id);    // delete by id
     void Clear();
+    // 用新的点集替换指定笔画（保持 id/color/width 不变，重算包围盒）。
+    // 供 UI 侧移动/旋转/缩放完成后把变换烘焙回数据层使用。
+    bool UpdateStroke(const std::string& id, const std::vector<Point>& points);
+
+    // 深拷贝整页（元素逐个克隆，不共享 Stroke），供撤销/重做历史快照使用。
+    std::shared_ptr<Page> Clone() const;
 
     EraserResult Eraser(const Rect& rc, int sid);
     EraserResult Eraser(const Rect& rc);

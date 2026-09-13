@@ -8,6 +8,10 @@
 #include "Whiteboard/command/eraser_commands.h"
 #include "Whiteboard/command/element_commands.h"
 #include "Whiteboard/command/full_sync_command.h"
+#include "Whiteboard/command/transform_commands.h"
+#include "Whiteboard/command/page_commands.h"
+#include "Whiteboard/command/undo_redo_commands.h"
+#include "Whiteboard/command/preview_commands.h"
 
 namespace whiteboard {
 namespace protocol {
@@ -27,33 +31,36 @@ std::string SerializeCommand(const Command& cmd)
         pk.pack(c->strokeId);
         pk.pack(c->width);
         pk.pack(c->color);
-        pk.pack(c->point);
+        pk.pack(c->points);
     }
     else if (auto* c = dynamic_cast<const StrokeMove*>(&cmd))
     {
         pk.pack_array(2);
         pk.pack(c->strokeId);
-        pk.pack(c->point);
+        pk.pack(c->points);
     }
     else if (auto* c = dynamic_cast<const StrokeEnd*>(&cmd))
     {
         pk.pack_array(2);
         pk.pack(c->strokeId);
-        pk.pack(c->point);
+        pk.pack(c->points);
     }
     else if (auto* c = dynamic_cast<const EraserBegin*>(&cmd))
     {
-        pk.pack_array(1);
+        pk.pack_array(2);
+        pk.pack(c->sessionId);
         pk.pack(c->points);
     }
     else if (auto* c = dynamic_cast<const EraserMove*>(&cmd))
     {
-        pk.pack_array(1);
+        pk.pack_array(2);
+        pk.pack(c->sessionId);
         pk.pack(c->points);
     }
     else if (auto* c = dynamic_cast<const EraserEnd*>(&cmd))
     {
-        pk.pack_array(2);
+        pk.pack_array(3);
+        pk.pack(c->sessionId);
         pk.pack(c->removedIds);
         pk.pack_array(static_cast<uint32_t>(c->addedElements.size()));
         for (const auto& e : c->addedElements)
@@ -72,7 +79,41 @@ std::string SerializeCommand(const Command& cmd)
     else if (auto* c = dynamic_cast<const FullSync*>(&cmd))
     {
         pk.pack_array(1);
-        PackElement(pk, c->page);
+        pk.pack_array(static_cast<uint32_t>(c->pages.size()));
+        for (const auto& page : c->pages)
+            PackElement(pk, page);
+    }
+    else if (auto* c = dynamic_cast<const StrokeUpdate*>(&cmd))
+    {
+        pk.pack_array(2);
+        pk.pack(c->strokeId);
+        pk.pack(c->points);
+    }
+    else if (auto* c = dynamic_cast<const LassoPreview*>(&cmd))
+    {
+        pk.pack_array(2);
+        pk.pack(c->sessionId);
+        pk.pack(c->points);
+    }
+    else if (auto* c = dynamic_cast<const SelectionPreview*>(&cmd))
+    {
+        pk.pack_array(3);
+        pk.pack(c->sessionId);
+        pk.pack(c->points);
+        pk.pack(c->selectedIds);
+    }
+    else if (auto* c = dynamic_cast<const PageCreate*>(&cmd))
+    {
+        pk.pack_array(1);
+        pk.pack(c->newPageId);
+    }
+    else if (dynamic_cast<const PageSelect*>(&cmd) ||
+             dynamic_cast<const PageDelete*>(&cmd) ||
+             dynamic_cast<const PageClear*>(&cmd) ||
+             dynamic_cast<const Undo*>(&cmd) ||
+             dynamic_cast<const Redo*>(&cmd))
+    {
+        pk.pack_array(0);
     }
     else
     {
@@ -108,31 +149,34 @@ std::shared_ptr<Command> DeserializeCommand(const std::string& data)
         payload.via.array.ptr[0].convert(c->strokeId);
         payload.via.array.ptr[1].convert(c->width);
         payload.via.array.ptr[2].convert(c->color);
-        payload.via.array.ptr[3].convert(c->point);
+        payload.via.array.ptr[3].convert(c->points);
     }
     else if (auto* c = dynamic_cast<StrokeMove*>(cmd.get()))
     {
         payload.via.array.ptr[0].convert(c->strokeId);
-        payload.via.array.ptr[1].convert(c->point);
+        payload.via.array.ptr[1].convert(c->points);
     }
     else if (auto* c = dynamic_cast<StrokeEnd*>(cmd.get()))
     {
         payload.via.array.ptr[0].convert(c->strokeId);
-        payload.via.array.ptr[1].convert(c->point);
+        payload.via.array.ptr[1].convert(c->points);
     }
     else if (auto* c = dynamic_cast<EraserBegin*>(cmd.get()))
     {
-        payload.via.array.ptr[0].convert(c->points);
+        payload.via.array.ptr[0].convert(c->sessionId);
+        payload.via.array.ptr[1].convert(c->points);
     }
     else if (auto* c = dynamic_cast<EraserMove*>(cmd.get()))
     {
-        payload.via.array.ptr[0].convert(c->points);
+        payload.via.array.ptr[0].convert(c->sessionId);
+        payload.via.array.ptr[1].convert(c->points);
     }
     else if (auto* c = dynamic_cast<EraserEnd*>(cmd.get()))
     {
-        payload.via.array.ptr[0].convert(c->removedIds);
+        payload.via.array.ptr[0].convert(c->sessionId);
+        payload.via.array.ptr[1].convert(c->removedIds);
 
-        const msgpack::object& arr = payload.via.array.ptr[1];
+        const msgpack::object& arr = payload.via.array.ptr[2];
         if (arr.type != msgpack::type::ARRAY)
             throw msgpack::type_error();
 
@@ -154,9 +198,45 @@ std::shared_ptr<Command> DeserializeCommand(const std::string& data)
     }
     else if (auto* c = dynamic_cast<FullSync*>(cmd.get()))
     {
-        auto page = std::dynamic_pointer_cast<Page>(UnpackElement(payload.via.array.ptr[0]));
-        if (page)
-            c->page = *page;
+        const msgpack::object& arr = payload.via.array.ptr[0];
+        if (arr.type != msgpack::type::ARRAY)
+            throw msgpack::type_error();
+
+        c->pages.clear();
+        for (uint32_t i = 0; i < arr.via.array.size; ++i)
+        {
+            auto page = std::dynamic_pointer_cast<Page>(UnpackElement(arr.via.array.ptr[i]));
+            if (page)
+                c->pages.push_back(*page);
+        }
+    }
+    else if (auto* c = dynamic_cast<StrokeUpdate*>(cmd.get()))
+    {
+        payload.via.array.ptr[0].convert(c->strokeId);
+        payload.via.array.ptr[1].convert(c->points);
+    }
+    else if (auto* c = dynamic_cast<LassoPreview*>(cmd.get()))
+    {
+        payload.via.array.ptr[0].convert(c->sessionId);
+        payload.via.array.ptr[1].convert(c->points);
+    }
+    else if (auto* c = dynamic_cast<SelectionPreview*>(cmd.get()))
+    {
+        payload.via.array.ptr[0].convert(c->sessionId);
+        payload.via.array.ptr[1].convert(c->points);
+        payload.via.array.ptr[2].convert(c->selectedIds);
+    }
+    else if (auto* c = dynamic_cast<PageCreate*>(cmd.get()))
+    {
+        payload.via.array.ptr[0].convert(c->newPageId);
+    }
+    else if (dynamic_cast<PageSelect*>(cmd.get()) ||
+             dynamic_cast<PageDelete*>(cmd.get()) ||
+             dynamic_cast<PageClear*>(cmd.get()) ||
+             dynamic_cast<Undo*>(cmd.get()) ||
+             dynamic_cast<Redo*>(cmd.get()))
+    {
+        // 空负载：所有信息都在基类 pageId
     }
 
     return cmd;

@@ -59,24 +59,28 @@ function(x264_add_object_libraries LIBRARY_NAME SOURCES)
     endif()
 endfunction()
 
-find_library(X264_MATH m)
 add_library(x264.math INTERFACE)
 
-set(X264_MATH_AS_LINK_OPTION OFF)
-set(X264_MATH_AS_EXTERNAL_LIBRARY OFF)
+if(NOT MSVC)
+    # MSVC 数学函数内置于 CRT，无需额外链接 libm
+    find_library(X264_MATH m)
 
-if ("X264_MATH-NOTFOUND" STREQUAL ${X264_MATH})
-    set(X264_MATH_AS_LINK_OPTION ON)
-else()
-    set(X264_MATH_AS_EXTERNAL_LIBRARY ON)
-endif()
+    set(X264_MATH_AS_LINK_OPTION OFF)
+    set(X264_MATH_AS_EXTERNAL_LIBRARY OFF)
 
-if (${X264_MATH_AS_LINK_OPTION})
-    target_link_options(x264.math INTERFACE "-lm")
-endif()
+    if ("X264_MATH-NOTFOUND" STREQUAL ${X264_MATH})
+        set(X264_MATH_AS_LINK_OPTION ON)
+    else()
+        set(X264_MATH_AS_EXTERNAL_LIBRARY ON)
+    endif()
 
-if(${X264_MATH_AS_EXTERNAL_LIBRARY})
-    target_link_libraries(x264.math INTERFACE ${X264_MATH})
+    if (${X264_MATH_AS_LINK_OPTION})
+        target_link_options(x264.math INTERFACE "-lm")
+    endif()
+
+    if(${X264_MATH_AS_EXTERNAL_LIBRARY})
+        target_link_libraries(x264.math INTERFACE ${X264_MATH})
+    endif()
 endif()
 
 set(X264_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")

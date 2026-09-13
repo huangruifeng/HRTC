@@ -1,0 +1,37 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="pen_normal.png">icons/toolbar_pen_small_normal.png</file>
+    <file alias="pen_pressed.png">icons/toolbar_pen_small_pressed.png</file>
+    <file alias="pen_check_pressed.png">icons/toolbar_pen_check_pressed.png</file>
+    <file alias="eraser_normal.png">icons/toolbar_eraser_normal.png</file>
+    <file alias="eraser_pressed.png">icons/toolbar_eraser_pressed.png</file>
+    <file alias="eraser_check_pressed.png">icons/toolbar_eraser_check_pressed.png</file>
+    <file alias="select_normal.png">icons/toolbar_select_normal.png</file>
+    <file alias="select_pressed.png">icons/toolbar_select_pressed.png</file>
+    <file alias="add_page_normal.png">icons/toolbar_quick_add_page_changed_normal.png</file>
+    <file alias="add_page_pressed.png">icons/toolbar_quick_add_page_changed_pressed.png</file>
+    <file alias="add_page_disabled.png">icons/toolbar_quick_add_page_changed_disabled.png</file>
+    <file alias="prev_normal.png">icons/toolbar_previous_page_normal.png</file>
+    <file alias="prev_pressed.png">icons/toolbar_previous_page_pressed.png</file>
+    <file alias="prev_disabled.png">icons/toolbar_previous_page_disabled.png</file>
+    <file alias="next_normal.png">icons/toolbar_next_page_normal.png</file>
+    <file alias="next_pressed.png">icons/toolbar_next_page_pressed.png</file>
+    <file alias="next_disabled.png">icons/toolbar_next_page_disabled.png</file>
+    <file alias="page_normal.png">icons/toolbar_page_normal.png</file>
+    <file alias="page_pressed.png">icons/toolbar_page_pressed.png</file>
+    <file alias="eraser_bg.png">icons/eraser_clear_screen_bg.png</file>
+    <file alias="eraser_thumb.png">icons/eraser_clear_screen_normal.png</file>
+    <file alias="eraser_thumb_pressed.png">icons/eraser_clear_screen_pressed.png</file>
+    <file alias="eraser_arrow.png">icons/eraser_clear_right.png</file>
+    <file alias="pen_type.png">icons/Pen_Conventional.png</file>
+    <file alias="brush_white.png">icons/Brush_White_Normal.png</file>
+    <file alias="brush_color.png">icons/Brush_Colorful_Normal.png</file>
+    <file alias="color_wheel.png">icons/ColorWheel.png</file>
+    <file alias="palette_select.png">icons/PaletteSelect.png</file>
+    <file alias="page_delete_normal.png">icons/toolbar_pagelist_item_delete_normal.png</file>
+    <file alias="page_delete_pressed.png">icons/toolbar_pagelist_item_delete_pressed.png</file>
+  </qresource>
+  <qresource prefix="/images">
+    <file alias="board_bg_default.png">images/board_bg_default.png</file>
+  </qresource>
+</RCC>

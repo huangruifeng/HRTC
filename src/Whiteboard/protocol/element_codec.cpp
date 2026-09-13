@@ -65,6 +65,10 @@ void UnpackPageFields(const msgpack::object& o, Page& p)
         if (e)
             p.elements.push_back(e);
     }
+
+    // 线协议不携带该标志；Page 默认构造关闭橡皮插值，反序列化后统一启用，
+    // 否则远程同步得到的页面在 Page::Eraser(rc, sid) 下会静默失效。
+    p.EnableEraserInsert(true);
 }
 
 } // namespace
