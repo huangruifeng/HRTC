@@ -257,8 +257,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(settingsPanel_, &SettingsPanel::displayModeChanged, this, &MainWindow::setDisplayMode);
 
     // ---------- 笔设置 / 滑动清屏面板 ----------
-    connect(penPanel_, &PenSettingPanel::penColorChanged, this, &MainWindow::onPickColorFromPanel);
-    connect(penPanel_, &PenSettingPanel::penWidthChanged, this, &MainWindow::onPenWidthChanged);
+    connect(penPanel_, &PenSettingPanel::penChanged, this, &MainWindow::onPenChanged);
     connect(eraserPanel_, &EraserPanel::clearRequested, this, &MainWindow::onClear);
     // 笔 / 擦除面板关闭：按钮恢复普通选中态图；
     // 若因点击对应工具按钮在按下阶段自动关闭：置标志，防止释放阶段重开
@@ -281,7 +280,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     view_->setTool(BoardView::Tool::Pen);
     toolBar_->setCurrentTool(BoardView::Tool::Pen);
     toolBar_->setZoomPercent(100.0);
-    penPanel_->setCurrent(penColor_, penWidth_);
+    penPanel_->setCurrent(PenSettingPanel::PenKind::Normal, penColor_, penWidth_);
 
     // 默认黑板背景：内置网格图（参考 MaxWhiteboard Image.Background.Default）
     backgroundKey_ = QStringLiteral(":/images/board_bg_default.png");
@@ -364,15 +363,16 @@ void MainWindow::showPanelAbove(QWidget* panel, BoardView::Tool tool) {
     toolBar_->setToolPanelExtended(tool, true);  // 面板展开中：按钮换展开态图
 }
 
-void MainWindow::onPickColorFromPanel(uint32_t color) {
-    penColor_ = color;
-    view_->setPenColor(color);
-    view_->setTool(BoardView::Tool::Pen);  // 选色即切回书写
-}
-
-void MainWindow::onPenWidthChanged(int width) {
+// 笔设置变化（类型/颜色/宽度任一变化）：荧光笔在颜色高 8 位编码 30% 透明度
+// （0x4D ≈ 30%；渲染层 colorToQColor 统一提取 alpha）；调整笔设置即切回书写
+void MainWindow::onPenChanged(PenSettingPanel::PenKind kind, uint32_t color, int width) {
+    penColor_ = (kind == PenSettingPanel::PenKind::Highlighter)
+                    ? (color | 0x4D000000u)
+                    : (color & 0x00FFFFFFu);
     penWidth_ = width;
-    view_->setPenWidth(width);
+    view_->setPenColor(penColor_);
+    view_->setPenWidth(penWidth_);
+    view_->setTool(BoardView::Tool::Pen);
 }
 
 // 滑动清屏：清空当前页并切回书写

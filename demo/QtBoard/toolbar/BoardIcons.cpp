@@ -188,6 +188,22 @@ void drawExit(QPainter& p, const QColor& c) {
     p.drawLine(QPointF(24.0, 11.5), QPointF(24.0, 25.0));
 }
 
+// 荧光笔：斜置粗头笔 + 底部荧光线
+void drawHighlighter(QPainter& p, const QColor& c) {
+    // 荧光线：底部粗横线
+    p.setPen(iconPen(c, 5.0));
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(QPointF(9.0, 38.0), QPointF(39.0, 38.0));
+
+    // 笔杆：斜线（右上）
+    p.setPen(iconPen(c, 6.0));
+    p.drawLine(QPointF(21.5, 25.5), QPointF(37.5, 9.5));
+
+    // 笔头：短粗段（左下，更宽，指向荧光线）
+    p.setPen(iconPen(c, 10.0));
+    p.drawLine(QPointF(21.5, 25.5), QPointF(15.0, 32.0));
+}
+
 }  // namespace
 
 QPixmap pixmap(Glyph glyph, bool active) {
@@ -238,6 +254,9 @@ QPixmap pixmap(Glyph glyph, bool active) {
             break;
         case Glyph::Exit:
             drawExit(p, color);
+            break;
+        case Glyph::Highlighter:
+            drawHighlighter(p, color);
             break;
     }
     return pm;

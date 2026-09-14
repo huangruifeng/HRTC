@@ -8,10 +8,10 @@
 #include <memory>
 
 #include "BoardView.h"
+#include "PenSettingPanel.h"
 #include "WhiteboardSession.h"
 
 class BoardToolBar;
-class PenSettingPanel;
 class EraserPanel;
 class SlideManagerPanel;
 class SettingsPanel;
@@ -36,8 +36,7 @@ protected:
 
 private:
     void onToolSelected(BoardView::Tool tool);
-    void onPickColorFromPanel(uint32_t color);
-    void onPenWidthChanged(int width);
+    void onPenChanged(PenSettingPanel::PenKind kind, uint32_t color, int width);
     void onClear();
     void onInteract();                       // 互动白板（入口在"更多"面板）：加入/断开房间
     void onExitApp();                        // 退出程序（入口在"更多"面板）
