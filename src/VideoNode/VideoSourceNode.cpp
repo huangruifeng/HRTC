@@ -24,7 +24,7 @@ RtcResult hrtc::VideoSourceNode::InitDevice(const std::string& id)
                 StopInternal();
             }
 
-            auto tmp = VideoCaptureFactory::Create(id.c_str());
+            auto tmp = m_deviceManager.CreateDevice(id);
             if (!tmp) {//select device failed.
                /* if (start) {
                     StartCapture();
@@ -32,7 +32,7 @@ RtcResult hrtc::VideoSourceNode::InitDevice(const std::string& id)
                 res = HRTC_CODE_ERROR_INVALID_ARG;
                 return;
             }
-            m_videoCap = tmp;
+            m_videoDevice = tmp;
             if (start) {
                 res = StartInternal();
                 return;
@@ -69,18 +69,23 @@ RtcResult hrtc::VideoSourceNode::StopCapture()
 
 RtcResult hrtc::VideoSourceNode::StartInternal()
 {
-    if (m_videoCap) {
+    if (m_videoDevice) {
 
-        if (!m_start || !m_videoCap->CaptureStarted()) {
+        if (!m_start || !m_videoDevice->IsCapturing()) {
 
-            //todo support caplicty;
-            VideoCaptureCapability cap;
-            cap.width = 800;
-            cap.height = 600;
-            cap.maxFPS = 15;
-            cap.videoType = VideoType::kYUY2;
-            m_videoCap->RegisterCaptureDataCallback(this);
-            auto res = m_videoCap->StartCapture(cap);
+            //todo support capability;
+            VideoCapability requested;
+            requested.width = 800;
+            requested.height = 600;
+            requested.maxFPS = 15;
+            requested.format = VideoPixelFormat::kYUY2;
+
+            VideoCapability selected;
+            if (FindBestCapability(m_videoDevice->GetCapabilities(), requested, selected) < 0) {
+                return HRTC_CODE_ERROR_NOT_SUPPORTED;
+            }
+            m_videoDevice->SetVideoSink(this);
+            auto res = m_videoDevice->StartCapture(selected);
             if (HRTC_SUCCESSED(res)) {
                 m_start = true;
             }
@@ -94,11 +99,11 @@ RtcResult hrtc::VideoSourceNode::StartInternal()
 
 RtcResult hrtc::VideoSourceNode::StopInternal()
 {
-    if (m_videoCap) {
-        if (m_start || m_videoCap->CaptureStarted()) {
-            auto res = m_videoCap->StopCapture();
+    if (m_videoDevice) {
+        if (m_start || m_videoDevice->IsCapturing()) {
+            auto res = m_videoDevice->StopCapture();
             if (HRTC_SUCCESSED(res)) {
-                m_videoCap->DeRegisterCaptureDataCallback();
+                m_videoDevice->SetVideoSink(nullptr);
                 m_start = false;
                 m_firstFrame = true;
             }
@@ -111,28 +116,31 @@ RtcResult hrtc::VideoSourceNode::StopInternal()
 }
 
 
-int32_t hrtc::VideoSourceNode::OnRawFrame(uint8_t* videoFrame, size_t videoFrameLength, const VideoCaptureCapability& frameInfo, VideoRotation rotation, int64_t captureTime)
+void hrtc::VideoSourceNode::OnVideoFrame(const VideoFrame& frame)
 {
     if (m_firstFrame) {
         hrtc::IMediaInfo::MediaFormat foramt;
         foramt.Video.format = VideoFormat::I420;
-        foramt.Video.width = frameInfo.width;
-        foramt.Video.height = frameInfo.height;
+        foramt.Video.width = frame.width();
+        foramt.Video.height = frame.height();
         m_info.SetMediaFormat(foramt);
         m_info.Alloc();
-        m_firstFrame = true;
+        m_firstFrame = false;
     }
 
-    libyuv::ConvertToI420(videoFrame, videoFrameLength,
+    VideoCapability frameInfo;
+    frameInfo.format = frame.format();
+    frameInfo.width = frame.width();
+    frameInfo.height = frame.height();
+
+    libyuv::ConvertToI420(frame.data(), frame.size(),
         m_info.GetData(0), m_info.GetLineSize(0),
         m_info.GetData(1), m_info.GetLineSize(1),
         m_info.GetData(2), m_info.GetLineSize(2),
-        0, 0, frameInfo.width, frameInfo.height,
-        frameInfo.width, frameInfo.height,
+        0, 0, frame.width(), frame.height(),
+        frame.width(), frame.height(),
         libyuv::RotationMode::kRotate0,
         frameInfo.GetVideoFormat());
 
     SendDataToOutput(m_info);
-    return HRTC_CODE_OK;
 }
-

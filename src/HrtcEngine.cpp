@@ -2,6 +2,7 @@
 #include "VideoNode/VideoSinkNode.h"
 #include "VideoNode/VideoSourceNode.h"
 #include "VideoNode/VideoEncodeNode.h"
+#include "CameraCapture/VideoDeviceManager.h"
 #include "Base/Thread/DispatchQueue.h"
 using namespace hrtc;
 
@@ -21,34 +22,31 @@ private:
     std::shared_ptr<dispatch_task_queue::task_queue> m_taskQueue;
 };
 
-class VideoDeviceManager : public IVideoDeviceManager {
+class VideoDeviceManagerImpl : public IVideoDeviceManager {
 public:
     std::vector<DeviceInfo> ListVideoDevice() override{
         std::vector<DeviceInfo> ret;
         if (m_thread) {
             m_thread->sync([&] {
-                auto num = m_deviceInfo->NumberOfDevices();
-                ret.resize(num);
-                for (int i = 0; i < num; i++) {
-                    char id[256] = { 0 };
-                    char name[256] = { 0 };
-                    m_deviceInfo->GetDeviceName(i, name, sizeof(name), id, sizeof(id));
-                    ret[i].deviceId = id;
-                    ret[i].deviceName = name;
+                auto devices = m_deviceManager.EnumerateDevices();
+                for (auto& device : devices) {
+                    DeviceInfo info;
+                    info.deviceId = device->deviceId();
+                    info.deviceName = device->deviceName();
+                    ret.push_back(info);
                 }
             });
         }
         return ret;
     }
 
-    VideoDeviceManager() :m_thread(dispatch_task_queue::task_queue::current()),m_deviceInfo(VideoCaptureFactory::CreateDeviceInfo()) {
+    VideoDeviceManagerImpl() :m_thread(dispatch_task_queue::task_queue::current()) {
     }
-    ~VideoDeviceManager() {
-        delete m_deviceInfo;
+    ~VideoDeviceManagerImpl() {
     }
 private:
     std::shared_ptr < dispatch_task_queue::task_queue> m_thread;
-    VideoCaptureModule::DeviceInfo* m_deviceInfo;
+    hrtc::VideoDeviceManager m_deviceManager;
 };
 
 
@@ -84,7 +82,7 @@ std::shared_ptr<IThread> hrtc::CreateThread(const std::string& name) {
 }
 
 std::shared_ptr<IVideoDeviceManager> hrtc::CreateVideoDeviceManager(const std::shared_ptr<IThread>& apiThread) {
-    return CreateWithThread<VideoDeviceManager>(apiThread);
+    return CreateWithThread<VideoDeviceManagerImpl>(apiThread);
 }
 
 
