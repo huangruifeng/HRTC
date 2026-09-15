@@ -24,9 +24,9 @@ namespace abi_foundation = ABI::Windows::Foundation;
 
 // 获取 WinRT 激活工厂
 template <typename T>
-HRESULT GetFactory(const wchar_t* runtimeClassId, ComPtr<T>* factory) {
+HRESULT GetFactory(const wchar_t* runtimeClassId, T** factory) {
   return RoGetActivationFactory(HStringReference(runtimeClassId).Get(),
-                                IID_PPV_ARGS(factory->GetAddressOf()));
+                                IID_PPV_ARGS(factory));
 }
 
 // 通过 IClosable 释放 WinRT 对象持有的原生资源
@@ -65,7 +65,7 @@ int ScreenCapturerWGC::StartInternal() {
   // 通过互操作接口按显示器/窗口句柄创建采集项 (Win10 1903+)
   ComPtr<IGraphicsCaptureItemInterop> interop;
   if (FAILED(GetFactory(L"Windows.Graphics.Capture.GraphicsCaptureItem",
-                        &interop)))
+                        interop.GetAddressOf())))
     return CleanupFail();
 
   HRESULT hr;
@@ -87,9 +87,9 @@ int ScreenCapturerWGC::StartInternal() {
   }
 
   // 创建自由线程帧池(回调在线程池 MTA 线程, 无需 CoreDispatcher)
-  ComPtr<abi_capture::IDirect3D11CaptureFramePoolStatics> poolStatics;
+  ComPtr<abi_capture::IDirect3D11CaptureFramePoolStatics2> poolStatics;
   if (FAILED(GetFactory(L"Windows.Graphics.Capture.Direct3D11CaptureFramePool",
-                        &poolStatics)))
+                        poolStatics.GetAddressOf())))
     return CleanupFail();
   hr = poolStatics->CreateFreeThreaded(
       winrtDevice_.Get(),
@@ -100,7 +100,7 @@ int ScreenCapturerWGC::StartInternal() {
 
   // 注册帧到达回调
   handler_ = Microsoft::WRL::Callback<FrameArrivedHandler>(
-                 [this](abi_capture::Direct3D11CaptureFramePool* sender,
+                 [this](CaptureFramePool* sender,
                         IInspectable*) -> HRESULT {
                    OnFrameArrived(sender);
                    return S_OK;
@@ -113,12 +113,8 @@ int ScreenCapturerWGC::StartInternal() {
     return CleanupFail();
   framePoolRegistered_ = true;
 
-  // 创建并启动采集会话
-  ComPtr<abi_capture::IGraphicsCaptureSessionFactory> sessionFactory;
-  if (FAILED(GetFactory(L"Windows.Graphics.Capture.GraphicsCaptureSession",
-                        &sessionFactory)))
-    return CleanupFail();
-  hr = sessionFactory->CreateInstance(item_.Get(), framePool_.Get(), &session_);
+  // 创建并启动采集会话(由帧池创建会话对象)
+  hr = framePool_->CreateCaptureSession(item_.Get(), &session_);
   if (FAILED(hr) || !session_)
     return CleanupFail();
 
@@ -202,7 +198,8 @@ void ScreenCapturerWGC::OnFrameArrived(CaptureFramePool* sender) {
 
   ComPtr<abi_d3d::IDirect3DSurface> surface;
   if (SUCCEEDED(frame->get_Surface(&surface)) && surface) {
-    ComPtr<IDirect3DDxgiInterfaceAccess> access;
+    ComPtr<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>
+        access;
     if (SUCCEEDED(surface.As(&access)) && access) {
       ComPtr<ID3D11Texture2D> texture;
       if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(&texture))) && texture) {

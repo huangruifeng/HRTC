@@ -61,7 +61,7 @@ class ScreenCapturerWGC : public ScreenCaptureBase {
       ABI::Windows::Graphics::Capture::IGraphicsCaptureSession>
       session_;
   Microsoft::WRL::ComPtr<FrameArrivedHandler> handler_;
-  ABI::Windows::Foundation::EventRegistrationToken token_ = {};
+  EventRegistrationToken token_ = {};
 
   Microsoft::WRL::ComPtr<ID3D11Texture2D> staging_;
   UINT stagingWidth_ = 0;
