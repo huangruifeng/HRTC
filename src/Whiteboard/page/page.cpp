@@ -2,10 +2,72 @@
 #include "Whiteboard/element/table.h"
 #include "Whiteboard/geometry/line_segment.h"
 #include <algorithm>
+#include <cmath>
 
 namespace whiteboard {
 
 namespace {
+constexpr double kPi = 3.14159265358979323846;
+
+// 页面橡皮矩形 → 格局部坐标外接矩形：rc 的九采样点绕表中心逆旋转回表内
+// 轴对齐坐标，再平移 −(格原点)；旋转矩形以外接矩形近似。
+Rect CellLocalEraserRect(const TableElement& table, const TableElement::Layout& layout,
+                         int cellIndex, const Rect& rc)
+{
+    double cellOx = 0.0;
+    double cellOy = 0.0;
+    layout.CellOrigin(cellIndex, cellOx, cellOy);
+
+    const double centerX = table.origin.x + layout.totalW / 2.0;
+    const double centerY = table.origin.y + layout.totalH / 2.0;
+    double cs = 1.0;
+    double sn = 0.0;
+    if (std::abs(table.rotation) > 1e-6f)
+    {
+        const double rad = table.rotation * kPi / 180.0;
+        cs = std::cos(rad);
+        sn = std::sin(rad);
+    }
+
+    const double xs[3] = { static_cast<double>(rc.x), rc.x + rc.width / 2.0,
+                           rc.x + static_cast<double>(rc.width) };
+    const double ys[3] = { static_cast<double>(rc.y), rc.y + rc.height / 2.0,
+                           rc.y + static_cast<double>(rc.height) };
+    double minx = 0.0;
+    double miny = 0.0;
+    double maxx = 0.0;
+    double maxy = 0.0;
+    bool first = true;
+    for (const double px : xs)
+    {
+        for (const double py : ys)
+        {
+            const double dx = px - centerX;
+            const double dy = py - centerY;
+            // 逆旋转回表内轴对齐坐标（旋转中心 = 布局中心）
+            const double wx = dx * cs + dy * sn + centerX;
+            const double wy = -dx * sn + dy * cs + centerY;
+            const double lx = wx - table.origin.x - cellOx;
+            const double ly = wy - table.origin.y - cellOy;
+            if (first)
+            {
+                minx = maxx = lx;
+                miny = maxy = ly;
+                first = false;
+            }
+            else
+            {
+                minx = std::min(minx, lx);
+                maxx = std::max(maxx, lx);
+                miny = std::min(miny, ly);
+                maxy = std::max(maxy, ly);
+            }
+        }
+    }
+    return Rect(static_cast<int>(std::lround(minx)), static_cast<int>(std::lround(miny)),
+                static_cast<int>(std::lround(maxx - minx)),
+                static_cast<int>(std::lround(maxy - miny)));
+}
 
 // 单列表内按 id 更新笔画点集并重算包围盒；找到目标返回 true。
 bool UpdateStrokeInList(std::list<std::shared_ptr<Element>>& list,
@@ -60,7 +122,8 @@ bool Page::UpdateStroke(const std::string& id, const std::vector<Point>& points)
 {
     if (UpdateStrokeInList(elements, id, points))
         return true;
-    // 表格单元格内的笔迹（坐标为页面绝对坐标，与页面级同一套更新逻辑）
+    // 表格单元格内的笔迹（坐标为格局部坐标，与页面级同一套更新逻辑；
+    // 调用方按笔迹所在坐标系传入点集）
     for (auto& e : elements)
     {
         if (auto* table = dynamic_cast<TableElement*>(e.get()))
@@ -149,8 +212,16 @@ EraserResult Page::Eraser(const Rect& rc)
     }
     for (auto* table : tables)
     {
+        // 橡皮 rc 为页面坐标，逐格转换为格局部坐标后交 EraseInList
+        // （碎片即格局部坐标，原地留在格内）
+        const TableElement::Layout layout = table->ComputeLayout();
         for (size_t ci = 0; ci < table->cells.size(); ++ci)
-            EraseInList(table->cells[ci], rc, result, table->id, static_cast<int>(ci));
+        {
+            const Rect local = CellLocalEraserRect(*table, layout, static_cast<int>(ci), rc);
+            if (local.width <= 0 || local.height <= 0)
+                continue;
+            EraseInList(table->cells[ci], local, result, table->id, static_cast<int>(ci));
+        }
     }
 
     return result;

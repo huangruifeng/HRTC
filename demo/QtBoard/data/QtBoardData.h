@@ -72,6 +72,8 @@ public:
     void Clear();
     // 全量导出当前页（初始化/页面切换全量重建用）
     void GetPage(whiteboard::Page& page);
+    // 按 id 深拷贝元素快照（同步等待；表格整表重建用，找不到返回 nullptr）
+    std::shared_ptr<whiteboard::Element> GetElementSnapshot(const std::string& id);
 
     // 元素变换烘焙：用新点集替换指定笔画（id/color/width 不变，重算包围盒）
     void UpdateStroke(const std::string& id, const std::vector<whiteboard::Point>& points);
@@ -84,16 +86,19 @@ public:
     void RemoveElements(const std::vector<std::string>& ids);
     // 图形几何静默写回（不触发 onElementsChanged，UI 自行保持同步）+ ElementUpdate 广播
     void UpdateGraphicGeometry(const std::string& id, const std::vector<whiteboard::Subpath>& subpaths);
-    // 表格几何静默写回（bounds + rotation 度，顺时针正角）+ ElementUpdate 广播
-    void UpdateTableGeometry(const std::string& id, const whiteboard::Rect& bounds, float rotation);
+    // 整表静默写回（变换烘焙用）：origin/rotation + 初始格尺寸 + 全部子元素整组替换；
+    // UI 已本地重建保证视觉零跳变（不触发 onElementsChanged）+ ElementUpdate 广播（整表快照）
+    void UpdateTableElement(std::shared_ptr<whiteboard::TableElement> table);
 
     // ---------- 文字元素：本地操作 ----------
     // 几何静默写回（锚点 + 字号 + rotation 度，顺时针正角）+ ElementUpdate 广播
     // （变换烘焙用；UI 自行保持同步）
     void UpdateTextGeometry(const std::string& id, int x, int y, int fontSize, float rotation);
-    // 文本内容编辑：PushSnapshot → 改 text → 深拷贝快照广播（ElementUpdate）+
-    // 增量回调（removed={id}/added={快照}），UI 与远端走同一重建路径
-    void UpdateTextContent(const std::string& id, const std::string& text);
+    // 文本内容编辑：PushSnapshot → 改 text + 字形包围盒 bounds（UI 用渲染端字体引擎
+    // 重算）→ 深拷贝快照广播（ElementUpdate）+ 增量回调（removed={id}/added={快照}），
+    // UI 与远端走同一重建路径；文本位于表格格内时改广播整表快照（布局可能变化）
+    void UpdateTextContent(const std::string& id, const std::string& text,
+                           const whiteboard::Rect& bounds);
 
     // ---------- 小工具元素：本地操作 ----------
     // 几何静默写回（卡片左上角 + 等比缩放 0.5~3.0）+ ElementUpdate 广播

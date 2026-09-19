@@ -87,14 +87,16 @@ void UnpackGraphicFields(const msgpack::object& o, GraphicElement& g)
 
 void PackTableFields(msgpack::packer<msgpack::sbuffer>& pk, const TableElement& t)
 {
-    pk.pack_array(8);
+    pk.pack_array(10);
     pk.pack(t.id);
-    pk.pack(t.bounds);
+    pk.pack(t.origin);
     pk.pack(t.rotation);
     pk.pack(t.rows);
     pk.pack(t.cols);
     pk.pack(t.width);
     pk.pack(t.color);
+    pk.pack(t.minCellW);
+    pk.pack(t.minCellH);
 
     // 单元格子元素：任意已注册类型递归 PackElement（含未来嵌套表格）
     pk.pack_array(static_cast<uint32_t>(t.cells.size()));
@@ -113,18 +115,20 @@ void PackTableFields(msgpack::packer<msgpack::sbuffer>& pk, const TableElement& 
 
 void UnpackTableFields(const msgpack::object& o, TableElement& t)
 {
-    if (o.type != msgpack::type::ARRAY || o.via.array.size != 8)
+    if (o.type != msgpack::type::ARRAY || o.via.array.size != 10)
         throw msgpack::type_error();
 
     o.via.array.ptr[0].convert(t.id);
-    o.via.array.ptr[1].convert(t.bounds);
+    o.via.array.ptr[1].convert(t.origin);
     o.via.array.ptr[2].convert(t.rotation);
     o.via.array.ptr[3].convert(t.rows);
     o.via.array.ptr[4].convert(t.cols);
     o.via.array.ptr[5].convert(t.width);
     o.via.array.ptr[6].convert(t.color);
+    o.via.array.ptr[7].convert(t.minCellW);
+    o.via.array.ptr[8].convert(t.minCellH);
 
-    const msgpack::object& arr = o.via.array.ptr[7];
+    const msgpack::object& arr = o.via.array.ptr[9];
     if (arr.type != msgpack::type::ARRAY)
         throw msgpack::type_error();
 
@@ -230,7 +234,7 @@ void UnpackMindMapFields(const msgpack::object& o, MindMapElement& m)
 
 void PackTextFields(msgpack::packer<msgpack::sbuffer>& pk, const TextElement& t)
 {
-    pk.pack_array(7);
+    pk.pack_array(8);
     pk.pack(t.id);
     pk.pack(t.text);
     pk.pack(t.x);
@@ -238,11 +242,12 @@ void PackTextFields(msgpack::packer<msgpack::sbuffer>& pk, const TextElement& t)
     pk.pack(t.fontSize);
     pk.pack(t.rotation);
     pk.pack(t.color);
+    pk.pack(t.bounds);
 }
 
 void UnpackTextFields(const msgpack::object& o, TextElement& t)
 {
-    if (o.type != msgpack::type::ARRAY || o.via.array.size != 7)
+    if (o.type != msgpack::type::ARRAY || o.via.array.size != 8)
         throw msgpack::type_error();
 
     o.via.array.ptr[0].convert(t.id);
@@ -252,6 +257,7 @@ void UnpackTextFields(const msgpack::object& o, TextElement& t)
     o.via.array.ptr[4].convert(t.fontSize);
     o.via.array.ptr[5].convert(t.rotation);
     o.via.array.ptr[6].convert(t.color);
+    o.via.array.ptr[7].convert(t.bounds);
 }
 
 void PackWidgetFields(msgpack::packer<msgpack::sbuffer>& pk, const WidgetElement& w)

@@ -1287,6 +1287,43 @@ QPainterPath tableGridPath(const whiteboard::Rect& b, int rows, int cols) {
     return path;
 }
 
+// 表格网格（按布局）：外框 + 按列宽/行高的行列分隔线（未旋转坐标；旋转由调用方施加）
+QPainterPath tableGridPathFromLayout(const whiteboard::Point& origin,
+                                     const whiteboard::TableElement::Layout& layout) {
+    QPainterPath path;
+    if (layout.totalW <= 0 || layout.totalH <= 0)
+        return path;
+    path.addRect(origin.x, origin.y, layout.totalW, layout.totalH);
+    double x = origin.x;
+    for (size_t j = 0; j + 1 < layout.colW.size(); ++j) {
+        x += layout.colW[j];
+        path.moveTo(x, origin.y);
+        path.lineTo(x, origin.y + layout.totalH);
+    }
+    double y = origin.y;
+    for (size_t i = 0; i + 1 < layout.rowH.size(); ++i) {
+        y += layout.rowH[i];
+        path.moveTo(origin.x, y);
+        path.lineTo(origin.x + layout.totalW, y);
+    }
+    return path;
+}
+
+// 表格格帧：格局部坐标 → 页面坐标（平移格原点后绕布局中心旋转 rotation）。
+// 格内子元素图元变换 = 自身局部变换 * 本帧；与数据层入格换算（PageToCellLocal）互为逆映射。
+QTransform tableCellFrame(const whiteboard::TableElement& t,
+                          const whiteboard::TableElement::Layout& layout, int cellIndex) {
+    double ox = 0.0;
+    double oy = 0.0;
+    layout.CellOrigin(cellIndex, ox, oy);
+    const double halfW = layout.totalW / 2.0;
+    const double halfH = layout.totalH / 2.0;
+    return QTransform()
+            .translate(t.origin.x + halfW, t.origin.y + halfH)
+            .rotate(t.rotation)
+            .translate(ox - halfW, oy - halfH);
+}
+
 // 思维导图：按值化布局结果生成绘制路径（连线 + 圆角节点框 + 折叠钮 + 聚焦 +/× 钮）。
 // 不依赖数据层树指针（数据线程可安全改树）；withButtons=false 用于缩略图。
 QPainterPath mindMapPathFromLayout(const whiteboard::MindLayout& layout,
@@ -1369,7 +1406,8 @@ void collectThumbBounds(const whiteboard::Element& e, QRectF& least, bool& hasCo
         return;
     }
     if (auto* t = dynamic_cast<const whiteboard::TableElement*>(&e)) {
-        const QRectF r(t->bounds.x, t->bounds.y, t->bounds.width, t->bounds.height);
+        const whiteboard::TableElement::Layout layout = t->ComputeLayout();
+        const QRectF r(t->origin.x, t->origin.y, layout.totalW, layout.totalH);
         QTransform tf;
         if (t->rotation != 0.0f) {
             const QPointF c = r.center();
@@ -1378,11 +1416,47 @@ void collectThumbBounds(const whiteboard::Element& e, QRectF& least, bool& hasCo
         const QRectF vr = tf.isIdentity() ? r : tf.mapRect(r);
         least = hasContent ? least.united(vr) : vr;
         hasContent = true;
-        // 子元素坐标为视觉绝对坐标，直接并入
-        for (const auto& cell : t->cells) {
-            for (const auto& child : cell) {
-                if (child)
-                    collectThumbBounds(*child, least, hasContent);
+        // 子元素为格局部坐标：经 自身变换 × 格帧 × 表旋转 映射到页面后并入
+        for (size_t ci = 0; ci < t->cells.size(); ++ci) {
+            const QTransform frame =
+                tableCellFrame(*t, layout, static_cast<int>(ci)) * tf;
+            for (const auto& child : t->cells[ci]) {
+                if (!child)
+                    continue;
+                QRectF cr;
+                bool ok = false;
+                if (auto* st = dynamic_cast<const whiteboard::Stroke*>(child.get())) {
+                    if (!st->points.empty()) {
+                        const whiteboard::Rect br = st->bounding.ToRect();
+                        cr = frame.mapRect(QRectF(br.x, br.y, br.width, br.height));
+                        ok = true;
+                    }
+                } else if (auto* g = dynamic_cast<const whiteboard::GraphicElement*>(child.get())) {
+                    if (!g->subpaths.empty()) {
+                        const whiteboard::Rect br = g->bounding.ToRect();
+                        cr = frame.mapRect(QRectF(br.x, br.y, br.width, br.height));
+                        ok = true;
+                    }
+                } else if (auto* tx = dynamic_cast<const whiteboard::TextElement*>(child.get())) {
+                    QRectF lr(tx->bounds.x, tx->bounds.y, tx->bounds.width, tx->bounds.height);
+                    if (lr.width() <= 0 || lr.height() <= 0) {
+                        const QPainterPath p = textPath(*tx);  // bounds 未维护时按字形兜底
+                        if (p.isEmpty())
+                            continue;
+                        lr = p.boundingRect();
+                    }
+                    QTransform childTf;
+                    if (tx->rotation != 0.0f) {
+                        childTf = QTransform().translate(tx->x, tx->y).rotate(tx->rotation)
+                                      .translate(-tx->x, -tx->y);
+                    }
+                    cr = (childTf * frame).mapRect(lr);
+                    ok = true;
+                }
+                if (ok) {
+                    least = hasContent ? least.united(cr) : cr;
+                    hasContent = true;
+                }
             }
         }
         return;
@@ -1444,24 +1518,53 @@ void paintThumbElement(QPainter& p, const whiteboard::Element& e) {
         return;
     }
     if (auto* t = dynamic_cast<const whiteboard::TableElement*>(&e)) {
-        p.save();
+        const whiteboard::TableElement::Layout layout = t->ComputeLayout();
+        const QRectF r(t->origin.x, t->origin.y, layout.totalW, layout.totalH);
+        QTransform tfTable;
         if (t->rotation != 0.0f) {
-            const QRectF r(t->bounds.x, t->bounds.y, t->bounds.width, t->bounds.height);
             const QPointF c = r.center();
-            p.translate(c);
-            p.rotate(t->rotation);
-            p.translate(-c);
+            tfTable = QTransform().translate(c.x(), c.y()).rotate(t->rotation)
+                          .translate(-c.x(), -c.y());
         }
         p.setBrush(Qt::NoBrush);
         p.setPen(elementPen(t->color, t->width));
-        p.drawPath(tableGridPath(t->bounds, t->rows, t->cols));
-        for (const auto& cell : t->cells) {
-            for (const auto& child : cell) {
-                if (child)
-                    paintThumbElement(p, *child);
+        const QPainterPath grid = tableGridPathFromLayout(t->origin, layout);
+        p.drawPath(tfTable.isIdentity() ? grid : tfTable.map(grid));
+        // 子元素为格局部坐标：手动映射到页面（自身变换 → 格帧 → 表旋转），
+        // 与渲染路径同构
+        for (size_t ci = 0; ci < t->cells.size(); ++ci) {
+            const QTransform frame =
+                tableCellFrame(*t, layout, static_cast<int>(ci)) * tfTable;
+            for (const auto& child : t->cells[ci]) {
+                if (!child)
+                    continue;
+                if (auto* st = dynamic_cast<const whiteboard::Stroke*>(child.get())) {
+                    if (st->points.empty())
+                        continue;
+                    p.setBrush(Qt::NoBrush);
+                    p.setPen(elementPen(st->color, st->width));
+                    p.drawPath(frame.map(strokePath(*st)));
+                } else if (auto* g = dynamic_cast<const whiteboard::GraphicElement*>(child.get())) {
+                    if (g->subpaths.empty())
+                        continue;
+                    p.setBrush(Qt::NoBrush);
+                    p.setPen(elementPen(g->color, g->width));
+                    p.drawPath(frame.map(graphicPath(*g)));
+                } else if (auto* tx = dynamic_cast<const whiteboard::TextElement*>(child.get())) {
+                    const QPainterPath path = textPath(*tx);
+                    if (path.isEmpty())
+                        continue;
+                    QTransform childTf;
+                    if (tx->rotation != 0.0f) {
+                        childTf = QTransform().translate(tx->x, tx->y).rotate(tx->rotation)
+                                      .translate(-tx->x, -tx->y);
+                    }
+                    p.setPen(Qt::NoPen);
+                    p.setBrush(colorToQColor(tx->color));
+                    p.drawPath((childTf * frame).map(path));
+                }
             }
         }
-        p.restore();
         return;
     }
     if (auto* mm = dynamic_cast<const whiteboard::MindMapElement*>(&e)) {
@@ -1796,6 +1899,7 @@ void BoardView::reloadPage() {
     elementItems_.clear();
     cellOwner_.clear();
     tableChildren_.clear();
+    tableLayouts_.clear();  // 表格布局缓存随页面全量重建失效
     mindLayouts_.clear();  // 布局缓存随页面全量重建失效
     pendingItems_.clear();
     remotePreview_.clear();
@@ -2167,15 +2271,19 @@ QGraphicsPathItem* BoardView::buildGraphicItem(const whiteboard::GraphicElement&
     return item;
 }
 
-// 表格元素：网格图元（data(1)=未旋转外框；rot!=0 时施加绕中心旋转）+ 递归构建单元格子元素
+// 表格元素：网格图元（由 ComputeLayout 生成：data(1)=未旋转布局外框、data(4)=行列数；
+// rot!=0 时施加绕布局中心旋转；布局写入 tableLayouts_ 缓存与网格 path 同源）+ 递归构建
+// 格内子元素（path 为格局部坐标，item 变换 = 自身局部变换 * 格帧）
 QGraphicsPathItem* BoardView::buildTableItem(const whiteboard::TableElement& t,
                                              const std::string& id) {
+    const whiteboard::TableElement::Layout layout = t.ComputeLayout();
+    const QString tableKey = QString::fromStdString(id);
     auto* item = new QGraphicsPathItem();
-    item->setPath(tableGridPath(t.bounds, t.rows, t.cols));
+    item->setPath(tableGridPathFromLayout(t.origin, layout));
     item->setPen(strokePen(t.color, t.width));
     item->setBrush(Qt::NoBrush);
-    item->setData(0, QString::fromStdString(id));
-    QRectF boundsRect(t.bounds.x, t.bounds.y, t.bounds.width, t.bounds.height);
+    item->setData(0, tableKey);
+    QRectF boundsRect(t.origin.x, t.origin.y, layout.totalW, layout.totalH);
     if (boundsRect.width() <= 0)
         boundsRect.setWidth(1);
     if (boundsRect.height() <= 0)
@@ -2184,25 +2292,28 @@ QGraphicsPathItem* BoardView::buildTableItem(const whiteboard::TableElement& t,
     item->setData(2, QStringLiteral("table"));
     QVariantList dims;
     dims << t.rows << t.cols;
-    item->setData(4, dims);  // 行列数：变换烘焙后重建网格路径用
+    item->setData(4, dims);  // 行列数（诊断信息；网格 path 即布局结果）
     item->setZValue(-1);  // 网格垫底：单元格内笔迹覆盖网格线
     if (t.rotation != 0.0f) {
-        const qreal cx = t.bounds.x + t.bounds.width / 2.0;
-        const qreal cy = t.bounds.y + t.bounds.height / 2.0;
+        const qreal cx = t.origin.x + layout.totalW / 2.0;
+        const qreal cy = t.origin.y + layout.totalH / 2.0;
         item->setTransform(QTransform().translate(cx, cy).rotate(t.rotation).translate(-cx, -cy));
     }
     scene_.addItem(item);
-    elementItems_.insert(QString::fromStdString(id), item);
+    elementItems_.insert(tableKey, item);
+    tableLayouts_.insert(tableKey, layout);
 
-    // 递归构建单元格子元素并登记归属（tableChildren_ 语义 = 全部后代，嵌套表格递归并入）
-    const QString tableKey = QString::fromStdString(id);
-    for (const auto& cell : t.cells) {
-        for (const auto& child : cell) {
+    // 递归构建格内子元素并登记归属（tableChildren_ 语义 = 全部后代，嵌套表格递归并入）
+    for (size_t ci = 0; ci < t.cells.size(); ++ci) {
+        const QTransform frame = tableCellFrame(t, layout, static_cast<int>(ci));
+        for (const auto& child : t.cells[ci]) {
             if (!child)
                 continue;
             QGraphicsPathItem* childItem = buildElementItem(*child);
             if (!childItem)
                 continue;
+            // 子元素 path 为格局部坐标：叠加格帧（含表格旋转）映射到页面
+            childItem->setTransform(childItem->transform() * frame);
             const QString childKey = QString::fromStdString(child->id);
             cellOwner_.insert(childKey, tableKey);
             tableChildren_[tableKey].append(childKey);
@@ -2211,6 +2322,70 @@ QGraphicsPathItem* BoardView::buildTableItem(const whiteboard::TableElement& t,
         }
     }
     return item;
+}
+
+// 整表重建：按数据层最新快照重建表格图元与全部格内子元素（格局部坐标 + 格帧变换）。
+// 用于格内内容变更（笔迹落库/橡皮/文字编辑/远端同步）与变换烘焙后布局重排更新；
+// 重建前记录选中 id，重建后按 expandToWholeTables 恢复整表选中（视觉零跳变）。
+void BoardView::rebuildTable(const QString& tableId) {
+    const auto snapshot = data_.GetElementSnapshot(tableId.toStdString());
+    auto* table = dynamic_cast<whiteboard::TableElement*>(snapshot.get());
+    if (!table)
+        return;
+
+    // 重建前选中 id 集合（含展开的整表子元素）
+    QSet<QString> selectedIds;
+    for (QGraphicsPathItem* it : selectedItems_) {
+        const QVariant v = it ? it->data(0) : QVariant();
+        if (v.isValid())
+            selectedIds.insert(v.toString());
+    }
+
+    // 清理旧图元（后代 + 表格自身）与归属/布局镜像
+    QStringList oldIds = tableChildren_.value(tableId);
+    oldIds.append(tableId);
+    bool selectionTouched = false;
+    for (const QString& key : oldIds) {
+        cellOwner_.remove(key);
+        tableChildren_.remove(key);
+        tableLayouts_.remove(key);
+        mindLayouts_.remove(key);
+        widgetRuntimes_.remove(key);
+        QGraphicsPathItem* item = elementItems_.take(key);
+        if (!item)
+            continue;
+        if (selectedItems_.removeAll(item) > 0)
+            selectionTouched = true;
+        scene_.removeItem(item);
+        delete item;
+    }
+
+    // 按快照重建（buildTableItem 重新写入 tableChildren_/tableLayouts_ 等镜像）
+    buildElementItem(*table);
+
+    // 选中恢复：原先选中过整表（或任一后代）→ 重建后展开为整表选中
+    bool wasSelected = selectedIds.contains(tableId);
+    if (!wasSelected) {
+        const QStringList kids = tableChildren_.value(tableId);
+        for (const QString& kid : kids) {
+            if (selectedIds.contains(kid)) {
+                wasSelected = true;
+                break;
+            }
+        }
+    }
+    if (wasSelected || selectionTouched) {
+        QList<QGraphicsPathItem*> keep = selectedItems_;
+        if (wasSelected) {
+            QGraphicsPathItem* item = elementItems_.value(tableId, nullptr);
+            if (item && !keep.contains(item))
+                keep.append(item);
+            keep = expandToWholeTables(keep);
+        }
+        clearSelection();
+        if (!keep.isEmpty())
+            selectItems(keep);
+    }
 }
 
 // 思维导图元素：按树布局生成路径（连线 + 圆角节点框 + 折叠钮 + 聚焦钮）。
@@ -3382,7 +3557,16 @@ void BoardView::beginTextEditing(const QPointF& scenePos, QGraphicsPathItem* exi
         seed.fontSize = textFontSize_;
         seed.color = textColor_;  // 新建文字颜色独立于笔色（文字面板选择）
     }
-    textEditAnchor_ = QPointF(seed.x, seed.y);
+    // 编辑框锚点/朝向：格内文字锚点为格局部坐标，需经图元全变换映射到场景
+    //（含表格旋转）；朝角取图元场景变换的旋转分量。页面级文字与旧行为一致。
+    QPointF editorAnchor(seed.x, seed.y);
+    qreal editorAngle = seed.rotation;
+    if (existing && cellOwner_.contains(existing->data(0).toString())) {
+        const QTransform st = existing->sceneTransform();
+        editorAnchor = st.map(editorAnchor);
+        editorAngle = qRadiansToDegrees(std::atan2(st.m12(), st.m11()));
+    }
+    textEditAnchor_ = editorAnchor;
     textEditColor_ = seed.color;
 
     auto* editor = new InlineTextEditor();
@@ -3428,16 +3612,16 @@ void BoardView::beginTextEditing(const QPointF& scenePos, QGraphicsPathItem* exi
     textEditFrame_->setZValue(149);
     scene_.addItem(textEditFrame_);
     textEditFrame_->setPos(textEditAnchor_);
-    if (!qFuzzyIsNull(seed.rotation))
-        textEditFrame_->setTransform(QTransform().rotate(seed.rotation));
+    if (!qFuzzyIsNull(editorAngle))
+        textEditFrame_->setTransform(QTransform().rotate(editorAngle));
 
     textEditor_ = editor;
     textEditorProxy_ = scene_.addWidget(editor);
     textEditorProxy_->setPos(textEditAnchor_);
     textEditorProxy_->setZValue(150);
-    if (!qFuzzyIsNull(seed.rotation)) {
+    if (!qFuzzyIsNull(editorAngle)) {
         // 旋转文字：编辑框绕锚点（= 代理局部原点）施加同一旋转，与隐藏字形原位对齐
-        textEditorProxy_->setTransform(QTransform().rotate(seed.rotation));
+        textEditorProxy_->setTransform(QTransform().rotate(editorAngle));
     }
     updateTextEditFrame();
     // widget 尺寸微变再复原：强制代理重抓首帧快照（空编辑框光标可靠呈现）
@@ -3483,7 +3667,25 @@ void BoardView::commitTextEditing() {
         const QString oldText = !meta.isEmpty() ? meta[0].toString() : QString();
         if (text == oldText)
             return;  // 内容未变：跳过写回（避免无谓的撤销步与重建）
-        data_.UpdateTextContent(existingId.toStdString(), text.toStdString());
+        // 重算字形包围盒（布局依赖）：与 seed 同参数字体渲染；格内文字为格局部坐标
+        whiteboard::TextElement nt;
+        if (meta.size() >= 6) {
+            nt.x = meta[1].toInt();
+            nt.y = meta[2].toInt();
+            nt.fontSize = meta[3].toInt();
+            nt.rotation = meta[4].toFloat();
+            nt.color = meta[5].toUInt();
+        } else {
+            nt.x = qRound(anchor.x());
+            nt.y = qRound(anchor.y());
+            nt.fontSize = textFontSize_;
+            nt.color = color;
+        }
+        nt.text = text.toStdString();
+        const QRectF br = textPath(nt).boundingRect();
+        data_.UpdateTextContent(existingId.toStdString(), text.toStdString(),
+                                whiteboard::Rect(qRound(br.x()), qRound(br.y()),
+                                                 qRound(br.width()), qRound(br.height())));
         return;
     }
     auto t = std::make_shared<whiteboard::TextElement>();
@@ -3493,6 +3695,11 @@ void BoardView::commitTextEditing() {
     t->y = qRound(anchor.y());
     t->fontSize = textFontSize_;
     t->color = color;
+    {
+        const QRectF br = textPath(*t).boundingRect();  // 字形包围盒（布局/入格依赖）
+        t->bounds = whiteboard::Rect(qRound(br.x()), qRound(br.y()),
+                                     qRound(br.width()), qRound(br.height()));
+    }
     data_.AddElement(t);
     setTool(Tool::Select);  // 新建文字成功后自动切回选择（空文本取消 / 编辑已有文字不切换）
 }
@@ -3683,9 +3890,12 @@ void BoardView::commitToolDraw(const QRectF& rect) {
     if (tool_ == Tool::Table) {
         auto table = std::make_shared<whiteboard::TableElement>();
         table->Reset();
-        table->bounds = rc;
+        table->origin = whiteboard::Point(rc.x, rc.y);  // 网格左上角
         table->rows = tableRows_;
         table->cols = tableCols_;
+        // 拖拽矩形均分 = 每格初始尺寸（=回缩下限）；整表宽高由布局从子元素推导
+        table->minCellW = qMax(1.0f, static_cast<float>(rc.width) / qMax(1, table->cols));
+        table->minCellH = qMax(1.0f, static_cast<float>(rc.height) / qMax(1, table->rows));
         table->cells.assign(static_cast<size_t>(table->rows * table->cols),
                             std::list<std::shared_ptr<whiteboard::Element>>());
         table->color = penColor_;
@@ -3892,30 +4102,57 @@ void BoardView::endSelectionDrag() {
     broadcastSelectionPreview();  // 烘焙后选择框同步到远端
 }
 
-// 变换烘焙：每个选中元素（含整表展开的后代）的新几何写回数据层（id 不变），
-// UI 图元复位变换。保证数据坐标 == 显示坐标，橡皮擦/切页/远端同步无需额外换算。
-// 分派：table → bounds+rotation；mindmap → root+scale+rotation；text → 锚点+字号+rotation；
-// graphic → subpaths；stroke → 点集。
+// 变换烘焙：每个选中元素的新几何写回数据层（id 不变），UI 图元复位/重建。
+// 表格整体处理：先预收集条目（重建会删除格子图元，不能边遍历边解引用旧指针），
+// 格内子元素由所属表格统一换算格局部几何并整表重建后跳过。
+// 分派：table → origin+rotation(+子元素缩放)；mindmap → root+scale+rotation；
+// text → 锚点+字号+rotation；graphic → subpaths；stroke → 点集。
 void BoardView::bakeTransformToData() {
-    // 撤销粒度：整次烘焙（表格 + 展开的格子笔迹等多条 Update*）合并为单个撤销步
-    data_.BeginBatch();
+    // 预收集条目（表格重建会删除格子图元 → 缓存 id/kind/归属避免悬空解引用）
+    struct Entry {
+        QGraphicsPathItem* item = nullptr;
+        QString id;
+        QString kind;
+        bool isChild = false;  // 格内子元素：由所属表格整体处理
+    };
+    QVector<Entry> entries;
     for (QGraphicsPathItem* item : selectedItems_) {
         if (!item)
             continue;
         const QVariant v = item->data(0);
         if (!v.isValid())
             continue;
+        Entry e;
+        e.item = item;
+        e.id = v.toString();
+        e.kind = item->data(2).toString();
+        e.isChild = cellOwner_.contains(e.id);
+        entries.append(e);
+    }
+
+    // 撤销粒度：整次烘焙（表格 + 其余元素等多条 Update*）合并为单个撤销步
+    data_.BeginBatch();
+    for (const Entry& entry : entries) {
+        QGraphicsPathItem* item = entry.item;
+        if (entry.isChild)
+            continue;  // 格内子元素：由所属表格（下方 table 分支）统一处理
         const QTransform tf = item->transform();
         if (tf.isIdentity())
             continue;
-        const std::string idStr = v.toString().toStdString();
-        const QString kind = item->data(2).toString();
+        const std::string idStr = entry.id.toStdString();
+        const QString& kind = entry.kind;
 
         if (kind == QLatin1String("table")) {
-            // 表格：未旋转外框四角经 tf 映射 → 新 bounds + 视觉朝向角（rotation）。
-            // 注意 tb 是 item->transform()（拖动中 = m*R_稳态），而 path 定义域四角
-            // 恰为数据系 bounds 四角，故 tf.map(bounds 四角) 即视觉四角。
+            // 表格：布局外框四角经 tf 映射 → 新 origin/朝向角（rotation）与逐轴缩放比 s。
+            // 纯移动/旋转仅写 origin/rotation（子元素数据不变，重建后视觉恒等）；
+            // 含缩放时按 s 逐轴缩放各子元素格局部几何 + minCell。
+            const auto layIt = tableLayouts_.constFind(entry.id);
+            if (layIt == tableLayouts_.constEnd())
+                continue;  // 布局缓存缺失（防御）
+            const whiteboard::TableElement::Layout& layout = layIt.value();
             const QRectF r0 = item->data(1).toRectF();
+            if (r0.width() < 1.0 || r0.height() < 1.0)
+                continue;
             const QPointF c0 = tf.map(r0.topLeft());
             const QPointF c1 = tf.map(r0.topRight());
             const QPointF c3 = tf.map(r0.bottomLeft());
@@ -3926,28 +4163,84 @@ void BoardView::bakeTransformToData() {
                 continue;  // 退化防御（缩放至 0 附近）
             const qreal angleDeg = qRadiansToDegrees(
                 std::atan2(c1.y() - c0.y(), c1.x() - c0.x()));
-            // 新 bounds 中心 = 视觉中心 (c0+c2)/2（平行四边形对角中点恒为中心）。
-            // 若直接把视觉左上角 c0 当轴对齐 bounds 左上角，θ≠0 时重建视口会偏移
-            // (w/2,h/2)+R(θ)(-w/2,-h/2)（旋转/移动后再烘焙都会跳位）。
-            const whiteboard::Rect nb(qRound((c0.x() + c2.x()) / 2.0 - w / 2.0),
-                                      qRound((c0.y() + c2.y()) / 2.0 - h / 2.0),
-                                      qRound(w), qRound(h));
-            data_.UpdateTableGeometry(idStr, nb, static_cast<float>(angleDeg));
-            // UI 复位与 buildTableItem 同构：path=grid(bounds) + 绕中心 rotation 变换
-            const QVariantList dims = item->data(4).toList();
-            const int rows = dims.size() > 0 ? dims[0].toInt() : 3;
-            const int cols = dims.size() > 1 ? dims[1].toInt() : 3;
-            const QRectF nbRect(nb.x, nb.y, nb.width, nb.height);
-            item->setPath(tableGridPath(nb, rows, cols));
-            item->setData(1, nbRect);
-            if (!qFuzzyIsNull(angleDeg)) {
-                const qreal ccx = nb.x + nb.width / 2.0;
-                const qreal ccy = nb.y + nb.height / 2.0;
-                item->setTransform(QTransform().translate(ccx, ccy).rotate(angleDeg)
-                                       .translate(-ccx, -ccy));
-            } else {
-                item->setTransform(QTransform());
+            const qreal sx = w / r0.width();
+            const qreal sy = h / r0.height();
+            // 新 origin：视觉中心 (c0+c2)/2 = tf 映射后的旧布局中心（平行四边形
+            // 对角中点恒为中心），再回退新宽高的一半（与旧 bounds 角点算法同构）
+            const QPointF visCenter((c0.x() + c2.x()) / 2.0, (c0.y() + c2.y()) / 2.0);
+            const QPointF originNew(visCenter.x() - w / 2.0, visCenter.y() - h / 2.0);
+
+            auto snapshot = data_.GetElementSnapshot(idStr);
+            auto* table = dynamic_cast<whiteboard::TableElement*>(snapshot.get());
+            if (!table)
+                continue;
+            table->origin = whiteboard::Point(qRound(originNew.x()), qRound(originNew.y()));
+            table->rotation = static_cast<float>(angleDeg);
+            const bool scaled = std::abs(sx - 1.0) > 1e-3 || std::abs(sy - 1.0) > 1e-3;
+            if (scaled) {
+                // 子元素格局部几何换算：p' = R'⁻¹(tf(V_old(p))) − c_new，
+                // V_old(p) = 旧格原点 + p（旧表帧），c_new = O' + s∘(旧格原点)。
+                // 行列位置按 s 近似同步缩放（非等比+旋转混合为近似，消除视觉跳变）
+                const QTransform invNew = QTransform()
+                        .translate(visCenter.x(), visCenter.y())
+                        .rotate(-angleDeg)
+                        .translate(-visCenter.x(), -visCenter.y());
+                for (size_t ci = 0; ci < table->cells.size(); ++ci) {
+                    double eox = 0.0;
+                    double eoy = 0.0;
+                    layout.CellOrigin(static_cast<int>(ci), eox, eoy);
+                    const double cellOldX = r0.x() + eox;
+                    const double cellOldY = r0.y() + eoy;
+                    const double cellNewX = originNew.x() + sx * eox;
+                    const double cellNewY = originNew.y() + sy * eoy;
+                    auto mapPt = [&](const whiteboard::Point& p) {
+                        const QPointF v = invNew.map(
+                            tf.map(QPointF(cellOldX + p.x, cellOldY + p.y)));
+                        return whiteboard::Point(qRound(v.x() - cellNewX),
+                                                 qRound(v.y() - cellNewY));
+                    };
+                    for (auto& child : table->cells[ci]) {
+                        if (!child)
+                            continue;
+                        if (auto* stroke = dynamic_cast<whiteboard::Stroke*>(child.get())) {
+                            for (auto& p : stroke->points)
+                                p = mapPt(p);
+                            for (auto& p : stroke->rawPoints)
+                                p = mapPt(p);
+                            stroke->bounding = whiteboard::BoundaryRect();
+                            for (const auto& p : stroke->points)
+                                stroke->bounding.Update(p.x, p.y);
+                        } else if (auto* graphic =
+                                       dynamic_cast<whiteboard::GraphicElement*>(child.get())) {
+                            for (auto& sp : graphic->subpaths) {
+                                for (auto& p : sp.points)
+                                    p = mapPt(p);
+                            }
+                            graphic->Rebuild();
+                        } else if (auto* text =
+                                       dynamic_cast<whiteboard::TextElement*>(child.get())) {
+                            const whiteboard::Point anchor =
+                                mapPt(whiteboard::Point(text->x, text->y));
+                            text->x = anchor.x;
+                            text->y = anchor.y;
+                            text->fontSize =
+                                qMax(4, qRound(text->fontSize * (sx + sy) / 2.0));
+                            const QRectF br = textPath(*text).boundingRect();
+                            text->bounds = whiteboard::Rect(qRound(br.x()), qRound(br.y()),
+                                                            qRound(br.width()),
+                                                            qRound(br.height()));
+                        }
+                        // 其余类型（导图/小工具）不入格：忽略
+                    }
+                }
+                table->minCellW = static_cast<float>(table->minCellW * sx);
+                table->minCellH = static_cast<float>(table->minCellH * sy);
             }
+            // 静默写回整表 + 本地整表重建（按快照重排布局；选中态由 rebuildTable 恢复）
+            // 别名构造：shared_ptr<TableElement> 与快照共享所有权（dynamic_cast 结果复用）
+            data_.UpdateTableElement(
+                std::shared_ptr<whiteboard::TableElement>(snapshot, table));
+            rebuildTable(entry.id);
         } else if (kind == QLatin1String("mindmap")) {
             // 导图：tf 映射布局包围盒四角求横纵缩放比与朝向角；新 root = tf.map(旧 root)；
             // 新 scale = 旧 scale × 映射比例。path 为"数据态几何"（root 平移 + scale 已乘入），
@@ -4923,22 +5216,40 @@ void BoardView::applyElementChanges(
     const std::vector<std::string>& removed,
     const std::vector<std::shared_ptr<whiteboard::Element>>& added,
     const std::vector<whiteboard::EraserPlacement>& placements) {
-    // 先删后加，保证 id 不冲突。removed 已由数据层递归展开（删除表格时含全部后代 id）。
+    // 先删后加，保证 id 不冲突。正常情况下 removed 已由数据层递归展开（删除表格时含全部
+    // 后代 id）；但「整表快照更新」路径（远端 UpdateTableElement / 本地格内文字编辑）只含
+    // 表格/子元素自身 id，需按 tableChildren_ 镜像展开后代。格内子元素被单独增删替换或
+    // 整表快照到达时不单独建模，统一在结尾按最新快照 rebuildTable（布局按内容重排）。
     // 导图结构更新（折叠/增删节点/烘焙）走 removed+added 重建路径：先存聚焦态，
     // 记录重建前被选中的 id，重建后恢复选中与聚焦（避免重建导致失去选中/聚焦态）。
     const QString keepFocusMap = mindFocusMap_;
     const QString keepFocusNode = mindFocusNode_;
-    bool selectionChanged = false;
-    QSet<QString> reselectIds;
+    QSet<QString> tablesToRebuild;  // 受影响待重建的表格 id（同批多次变更只重建一次）
+    QStringList removeOrder;
     for (const std::string& id : removed) {
         const QString key = QString::fromStdString(id);
-        // 归属映射清理：自身出表 + 从父表格后代列表移除
+        if (removeOrder.contains(key))
+            continue;
+        removeOrder.append(key);
+        const QStringList kids = tableChildren_.value(key);  // 镜像后代随表格级联删除
+        for (const QString& kid : kids) {
+            if (!removeOrder.contains(kid))
+                removeOrder.append(kid);
+        }
+    }
+    bool selectionChanged = false;
+    QSet<QString> reselectIds;
+    for (const QString& key : removeOrder) {
+        // 归属映射清理：自身出表 + 从父表格后代列表移除；父表未被整体删除时待重建
         if (cellOwner_.contains(key)) {
             const QString parent = cellOwner_.take(key);
             if (tableChildren_.contains(parent))
                 tableChildren_[parent].removeAll(key);
+            if (!removeOrder.contains(parent) && elementItems_.contains(parent))
+                tablesToRebuild.insert(parent);  // 格内内容单独被删：父表按新内容重排
         }
         tableChildren_.remove(key);  // 被删者本身是表格时移除其后代镜像
+        tableLayouts_.remove(key);   // 表格布局缓存失效（重建时由 buildTableItem 重新写入）
         mindLayouts_.remove(key);    // 导图布局缓存失效（重建时由 buildMindMapItem 重新写入）
         widgetRuntimes_.remove(key); // 小工具运行时随元素删除（撤销恢复 → 初始停止态）
         if (optionsEditor_ && optionsEditId_ == key)
@@ -4959,7 +5270,7 @@ void BoardView::applyElementChanges(
         } else {
             const QList<QGraphicsPathItem*> keep = selectedItems_;  // 拷贝后重建框（收缩）
             clearSelection();
-            selectItems(keep);
+            selectItems(expandToWholeTables(keep));  // 维持整表选中不变量
         }
     }
     for (size_t i = 0; i < added.size(); ++i) {
@@ -4970,20 +5281,23 @@ void BoardView::applyElementChanges(
             scene_.removeItem(preview);
             delete preview;
         }
-        if (elementItems_.contains(key))
-            continue;
-        buildElementItem(e);
-        // 归属登记：新增元素位于表格单元格内（橡皮碎片/新笔画落位）时记录映射，
-        // 选择整表展开与删除级联依赖该镜像；placements 与 added 一一对齐。
+        // 格内子元素（笔迹落库/橡皮碎片/新图形文字入格）：added 中坐标已是格局部，
+        // 不单独建模，所属表格统一按最新快照重建（归属镜像由 buildTableItem 重建）
         if (i < placements.size() && !placements[i].parentId.empty()) {
-            const QString parentKey = QString::fromStdString(placements[i].parentId);
-            cellOwner_.insert(key, parentKey);
-            if (!tableChildren_[parentKey].contains(key)) {
-                tableChildren_[parentKey].append(key);
-                if (tableChildren_.contains(key))
-                    tableChildren_[parentKey] += tableChildren_.value(key);
-            }
+            tablesToRebuild.insert(QString::fromStdString(placements[i].parentId));
+            continue;
         }
+        // 已存在的表格收到整表快照（本地格内文字编辑 / 远端表格更新）：整表重建
+        if (elementItems_.contains(key)) {
+            tablesToRebuild.insert(key);
+            continue;
+        }
+        buildElementItem(e);
+    }
+    // 统一重建受影响的表格（快照取自数据层；选中态由 rebuildTable 内部按原选中恢复）
+    for (const QString& tableId : tablesToRebuild) {
+        if (elementItems_.contains(tableId))
+            rebuildTable(tableId);
     }
     // 重建后恢复选中（新 item 指针已变，重建选择框；原选中集保留合并）
     if (!reselectIds.isEmpty()) {
@@ -4998,7 +5312,7 @@ void BoardView::applyElementChanges(
         }
         if (hasRebuilt && !keep.isEmpty()) {
             clearSelection();
-            selectItems(keep);
+            selectItems(expandToWholeTables(keep));  // 维持整表选中不变量
         }
     }
     // 聚焦恢复：节点在新布局中仍可见才恢复（折叠 / 删除导致不可见则保持清除）
@@ -5021,6 +5335,14 @@ void BoardView::applyStrokeCommitted(uint64_t token, const std::string& id,
     // Clear/切页可能已把 item 删除（item 不再属于 scene），此时忽略
     if (!item->scene())
         return;
+    // 笔迹归属表格格：pending 预览为页面坐标、正式形态为格局部坐标 + 格帧变换，
+    // 无法原地转正，丢弃预览并按数据层最新快照整表重建（布局随内容重排）
+    if (!parentId.empty()) {
+        scene_.removeItem(item);
+        delete item;
+        rebuildTable(QString::fromStdString(parentId));
+        return;
+    }
     item->setData(0, QString::fromStdString(id));
     // 与 buildStrokeItem 对齐：转正时补写外接矩形 data(1)。否则选择框与框选粗筛
     // 退化为 path().boundingRect()，水平/垂直直线一维为 0 时 QRectF 相交判定
@@ -5033,14 +5355,6 @@ void BoardView::applyStrokeCommitted(uint64_t token, const std::string& id,
     item->setData(1, br);
     const QString key = QString::fromStdString(id);
     elementItems_.insert(key, item);
-    // 归属登记：笔迹起点落在表格单元格时（数据层已将其移入单元格），记录
-    // 子→表格 与 表格→子 映射，选择时才能整表展开
-    if (!parentId.empty()) {
-        const QString parentKey = QString::fromStdString(parentId);
-        cellOwner_.insert(key, parentKey);
-        if (!tableChildren_[parentKey].contains(key))
-            tableChildren_[parentKey].append(key);
-    }
 }
 
 void BoardView::applyCleared() {
@@ -5056,6 +5370,7 @@ void BoardView::applyCleared() {
     elementItems_.clear();
     cellOwner_.clear();
     tableChildren_.clear();
+    tableLayouts_.clear();  // 表格布局缓存随清空失效
     mindLayouts_.clear();  // 布局缓存随清空失效
     pendingItems_.clear();
     remotePreview_.clear();

@@ -19,6 +19,7 @@ void TextElement::Reset()
     fontSize = 32;
     rotation = 0.0f;
     color = 0x00FFFFFF;
+    bounds = Rect();
 }
 
 }

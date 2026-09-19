@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <utility>
 
 #include "Whiteboard/command/element_commands.h"
@@ -119,18 +120,117 @@ bool PlaceInTableById(std::list<std::shared_ptr<whiteboard::Element>>& list,
     return false;
 }
 
-// 起点归属：若起点落在某表格单元格内，把元素放入该单元格并返回 true（
-// 双端确定性重放的通用归属助手；v1 仅画笔笔迹使用）。out 非空时回填归属位置。
+// 页面坐标 → 格局部坐标：绕布局中心逆旋转（rotation 为 Qt 顺时针正角）
+// 后平移 −(格原点)。与渲染层表帧（绕中心旋转 ∘ 平移格原点）互为逆映射。
+whiteboard::Point PageToCellLocal(const whiteboard::TableElement& table,
+                                  const whiteboard::TableElement::Layout& layout,
+                                  int cellIndex, double px, double py) {
+    double cellOx = 0.0;
+    double cellOy = 0.0;
+    layout.CellOrigin(cellIndex, cellOx, cellOy);
+    const double hw = layout.totalW / 2.0;
+    const double hh = layout.totalH / 2.0;
+    // 相对布局中心（未旋转表内方向）
+    double rx = px - table.origin.x - hw;
+    double ry = py - table.origin.y - hh;
+    if (std::abs(table.rotation) > 1e-6f) {
+        const double rad = table.rotation * 3.14159265358979323846 / 180.0;
+        const double cs = std::cos(rad);
+        const double sn = std::sin(rad);
+        const double nx = rx * cs + ry * sn;
+        const double ny = -rx * sn + ry * cs;
+        rx = nx;
+        ry = ny;
+    }
+    return whiteboard::Point(static_cast<int>(std::lround(rx + hw - cellOx)),
+                             static_cast<int>(std::lround(ry + hh - cellOy)));
+}
+
+// 几何入格转换：把元素几何从页面坐标映射为格局部坐标（保持屏幕视觉不变）。
+// 笔迹：点集/原始点集重映射并重算包围盒；图形：子路径点集重映射 + Rebuild；
+// 文字：锚点映射 + bounds 同步平移 + rotation 减去表角（屏幕视觉不变）。
+void ConvertGeometryToCellLocal(const whiteboard::TableElement& table,
+                                const whiteboard::TableElement::Layout& layout,
+                                int cellIndex, whiteboard::Element& element) {
+    if (auto* stroke = dynamic_cast<whiteboard::Stroke*>(&element)) {
+        for (auto& p : stroke->points)
+            p = PageToCellLocal(table, layout, cellIndex, p.x, p.y);
+        for (auto& p : stroke->rawPoints)
+            p = PageToCellLocal(table, layout, cellIndex, p.x, p.y);
+        stroke->bounding = whiteboard::BoundaryRect();
+        for (const auto& p : stroke->points)
+            stroke->bounding.Update(p.x, p.y);
+        return;
+    }
+    if (auto* graphic = dynamic_cast<whiteboard::GraphicElement*>(&element)) {
+        for (auto& sp : graphic->subpaths) {
+            for (auto& p : sp.points)
+                p = PageToCellLocal(table, layout, cellIndex, p.x, p.y);
+        }
+        graphic->Rebuild();
+        return;
+    }
+    if (auto* text = dynamic_cast<whiteboard::TextElement*>(&element)) {
+        const whiteboard::Point anchor =
+            PageToCellLocal(table, layout, cellIndex, text->x, text->y);
+        const int dx = anchor.x - text->x;
+        const int dy = anchor.y - text->y;
+        text->x = anchor.x;
+        text->y = anchor.y;
+        text->bounds.x += dx;
+        text->bounds.y += dy;
+        // 表旋转并入元素自身角度：保持屏幕视觉不变
+        text->rotation -= table.rotation;
+        return;
+    }
+}
+
+// 递归查找 id 所在单元格（表格子元素）：返回所属表格 id 与格索引（未找到 false）
+bool FindCellOwnerInList(const std::list<std::shared_ptr<whiteboard::Element>>& list,
+                         const std::string& id, std::string& parentId, int& cellIndex) {
+    for (const auto& e : list) {
+        auto* table = dynamic_cast<whiteboard::TableElement*>(e.get());
+        if (!table)
+            continue;
+        for (size_t ci = 0; ci < table->cells.size(); ++ci) {
+            for (const auto& child : table->cells[ci]) {
+                if (child && child->id == id) {
+                    parentId = table->id;
+                    cellIndex = static_cast<int>(ci);
+                    return true;
+                }
+            }
+        }
+        for (const auto& cell : table->cells) {
+            if (FindCellOwnerInList(cell, id, parentId, cellIndex))
+                return true;
+        }
+    }
+    return false;
+}
+
+// 判定点归属：若判定点落在某表格单元格内，把元素放入该单元格并返回 true
+// （双端确定性重放的通用归属助手）。仅 笔迹/图形/文字 可入格（白名单；
+// 导图/小工具/表格不入格），命中后几何整体转格局部坐标；嵌套递归保留。
+// out 非空时回填归属位置。
 bool AdoptIntoTableInList(std::list<std::shared_ptr<whiteboard::Element>>& list,
                           const whiteboard::Point& start,
                           const std::shared_ptr<whiteboard::Element>& element,
                           whiteboard::EraserPlacement* out) {
+    const bool eligible = dynamic_cast<whiteboard::Stroke*>(element.get()) ||
+                          dynamic_cast<whiteboard::GraphicElement*>(element.get()) ||
+                          dynamic_cast<whiteboard::TextElement*>(element.get());
+    if (!eligible)
+        return false;
+
     for (auto& e : list) {
         auto* table = dynamic_cast<whiteboard::TableElement*>(e.get());
         if (!table)
             continue;
         const int ci = table->CellIndexAt(start);
         if (ci >= 0 && ci < static_cast<int>(table->cells.size())) {
+            // 几何转格局部（布局取入格前状态，与判定一致）
+            ConvertGeometryToCellLocal(*table, table->ComputeLayout(), ci, *element);
             table->cells[ci].push_back(element);
             if (out) {
                 out->parentId = table->id;
@@ -439,6 +539,17 @@ void QtBoardData::GetPage(whiteboard::Page& page) {
     });
 }
 
+// 按 id 深拷贝元素快照（同步；表格整表重建用）。找不到返回 nullptr。
+std::shared_ptr<whiteboard::Element> QtBoardData::GetElementSnapshot(const std::string& id) {
+    std::shared_ptr<whiteboard::Element> snapshot;
+    thread_->Invoke([this, &snapshot, &id]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        if (found)
+            snapshot = whiteboard::CloneElement(*found);
+    });
+    return snapshot;
+}
+
 void QtBoardData::UpdateStroke(const std::string& id,
                                const std::vector<whiteboard::Point>& points) {
     thread_->BeginInvoke([this, id, points]() {
@@ -461,18 +572,51 @@ void QtBoardData::AddElement(std::shared_ptr<whiteboard::Element> element) {
         if (!element)
             return;
         PushSnapshot();
-        CurrentPage()->Append(element);
 
-        auto cmd = std::make_shared<whiteboard::ElementAdd>();
-        cmd->pageId = CurrentPage()->pageId;
-        cmd->element = element;
-        if (onOutgoingCmd_)
-            onOutgoingCmd_(std::move(cmd));
+        // 图形（拖拽矩形中心判定）/文字（锚点判定）尝试入格；笔迹走 PenEnd
+        // 专属路径；表格/导图/小工具不入格（白名单在归属助手内）
+        whiteboard::EraserPlacement placement;
+        whiteboard::Point anchor;
+        bool hasAnchor = false;
+        if (auto* graphic = dynamic_cast<whiteboard::GraphicElement*>(element.get())) {
+            const whiteboard::Rect br = graphic->bounding.ToRect();
+            anchor = whiteboard::Point(br.x + br.width / 2, br.y + br.height / 2);
+            hasAnchor = true;
+        } else if (auto* text = dynamic_cast<whiteboard::TextElement*>(element.get())) {
+            anchor = whiteboard::Point(text->x, text->y);
+            hasAnchor = true;
+        }
+        const bool adopted = hasAnchor &&
+            AdoptIntoTableInList(CurrentPage()->elements, anchor, element, &placement);
+
+        if (adopted) {
+            // 入格：对远端广播整表快照（避免对端把子元素按页面级误置）
+            auto* found = FindElementInList(CurrentPage()->elements, placement.parentId);
+            auto* table = dynamic_cast<whiteboard::TableElement*>(found);
+            auto snapshot = table ? whiteboard::CloneElement(*table) : nullptr;
+            if (snapshot) {
+                auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+                cmd->pageId = CurrentPage()->pageId;
+                cmd->element = std::move(snapshot);
+                if (onOutgoingCmd_)
+                    onOutgoingCmd_(std::move(cmd));
+            }
+        } else {
+            CurrentPage()->Append(element);
+            auto cmd = std::make_shared<whiteboard::ElementAdd>();
+            cmd->pageId = CurrentPage()->pageId;
+            cmd->element = element;
+            if (onOutgoingCmd_)
+                onOutgoingCmd_(std::move(cmd));
+        }
 
         if (onElementsChanged_) {
             std::vector<std::string> removed;
             std::vector<std::shared_ptr<whiteboard::Element>> added = { element };
-            onElementsChanged_(std::move(removed), std::move(added), {});
+            std::vector<whiteboard::EraserPlacement> placements;
+            if (adopted)
+                placements.push_back(placement);  // 与 added 对齐（空 = 页面级）
+            onElementsChanged_(std::move(removed), std::move(added), std::move(placements));
         }
     });
 }
@@ -539,21 +683,30 @@ void QtBoardData::UpdateGraphicGeometry(const std::string& id,
     });
 }
 
-void QtBoardData::UpdateTableGeometry(const std::string& id, const whiteboard::Rect& bounds,
-                                      float rotation) {
-    thread_->BeginInvoke([this, id, bounds, rotation]() {
-        auto* found = FindElementInList(CurrentPage()->elements, id);
-        auto* table = dynamic_cast<whiteboard::TableElement*>(found);
+// 整表静默写回（变换烘焙用）：origin/rotation/初始格尺寸 + 全部子元素整组替换。
+// UI 已本地重建保证视觉零跳变（不触发 onElementsChanged），仅广播远端。
+void QtBoardData::UpdateTableElement(std::shared_ptr<whiteboard::TableElement> table) {
+    thread_->BeginInvoke([this, table]() {
         if (!table)
             return;
-        PushSnapshot();  // 变换烘焙是一次可撤销操作
-        table->bounds = bounds;
-        table->rotation = rotation;
+        auto* found = FindElementInList(CurrentPage()->elements, table->id);
+        auto* current = dynamic_cast<whiteboard::TableElement*>(found);
+        if (!current)
+            return;
+        PushSnapshot();  // 变换烘焙是一次可撤销操作（批内由 BeginBatch/EndBatch 合并）
+        current->origin = table->origin;
+        current->rotation = table->rotation;
+        current->rows = table->rows;
+        current->cols = table->cols;
+        current->width = table->width;
+        current->color = table->color;
+        current->minCellW = table->minCellW;
+        current->minCellH = table->minCellH;
+        current->cells = table->cells;  // 子元素整组替换（旧子元素随之释放）
 
-        // 静默写回：不触发 onElementsChanged（UI 已自行更新），仅广播给远端
         auto cmd = std::make_shared<whiteboard::ElementUpdate>();
         cmd->pageId = CurrentPage()->pageId;
-        cmd->element = std::make_shared<whiteboard::TableElement>(*table);
+        cmd->element = whiteboard::CloneElement(*current);  // 深拷贝：远端序列化脱离活对象
         if (onOutgoingCmd_)
             onOutgoingCmd_(std::move(cmd));
     });
@@ -583,16 +736,40 @@ void QtBoardData::UpdateTextGeometry(const std::string& id, int x, int y, int fo
     });
 }
 
-void QtBoardData::UpdateTextContent(const std::string& id, const std::string& text) {
-    thread_->BeginInvoke([this, id, text]() {
+void QtBoardData::UpdateTextContent(const std::string& id, const std::string& text,
+                                    const whiteboard::Rect& bounds) {
+    thread_->BeginInvoke([this, id, text, bounds]() {
         auto* found = FindElementInList(CurrentPage()->elements, id);
         auto* element = dynamic_cast<whiteboard::TextElement*>(found);
         if (!element)
             return;
         PushSnapshot();  // 内容编辑是一次可撤销操作
         element->text = text;
+        element->bounds = bounds;  // UI 重算的字形包围盒（布局依赖）
 
-        // 深拷贝快照（脱离数据线程活对象）+ removed/added 重建路径，
+        // 格内文本：布局可能变化，改广播整表快照（added = 整表，UI 重建整表）
+        std::string parentId;
+        int cellIndex = -1;
+        if (FindCellOwnerInList(CurrentPage()->elements, id, parentId, cellIndex)) {
+            auto* owner = FindElementInList(CurrentPage()->elements, parentId);
+            auto* table = dynamic_cast<whiteboard::TableElement*>(owner);
+            auto snapshot = table ? whiteboard::CloneElement(*table) : nullptr;
+            if (!snapshot)
+                return;
+            auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+            cmd->pageId = CurrentPage()->pageId;
+            cmd->element = snapshot;
+            if (onOutgoingCmd_)
+                onOutgoingCmd_(std::move(cmd));
+            if (onElementsChanged_) {
+                std::vector<std::string> removed = { id };
+                std::vector<std::shared_ptr<whiteboard::Element>> added = { snapshot };
+                onElementsChanged_(std::move(removed), std::move(added), {});
+            }
+            return;
+        }
+
+        // 页面级文本：深拷贝快照（脱离数据线程活对象）+ removed/added 重建路径，
         // UI 与远端走同一路径（复用选中态恢复逻辑）
         auto snapshot = whiteboard::CloneElement(*element);
         if (!snapshot)

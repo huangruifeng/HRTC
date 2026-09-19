@@ -138,6 +138,7 @@ private:
     QGraphicsPathItem* buildStrokeItem(const whiteboard::Stroke& stroke, const std::string& id);
     QGraphicsPathItem* buildGraphicItem(const whiteboard::GraphicElement& g, const std::string& id);
     QGraphicsPathItem* buildTableItem(const whiteboard::TableElement& t, const std::string& id);
+    void rebuildTable(const QString& tableId);  // 按数据层快照整表重建（布局重排/格内内容变更后）
     QGraphicsPathItem* buildMindMapItem(const whiteboard::MindMapElement& mind,
                                         const std::string& id);
     QGraphicsPathItem* buildTextItem(const whiteboard::TextElement& t, const std::string& id);
@@ -312,6 +313,9 @@ private:
     // 表格归属映射：后代 id -> 直接父表格 id；表格 id -> 全部后代 id（含嵌套递归展开）
     QHash<QString, QString> cellOwner_;
     QHash<QString, QStringList> tableChildren_;
+    // 表格布局缓存（值化结果：列宽/行高/总尺寸；渲染/命中/变换烘焙共用，
+    // 与 buildTableItem 写入的网格 path 严格同源）
+    QHash<QString, whiteboard::TableElement::Layout> tableLayouts_;
     // 思维导图布局缓存（值化结果，数据态坐标；钮绘制与命中判定用）
     QHash<QString, whiteboard::MindLayout> mindLayouts_;
     QString mindFocusMap_;   // 聚焦节点所属导图 id（空 = 无聚焦）

@@ -85,12 +85,14 @@ std::shared_ptr<Element> CloneElement(const Element& e)
     {
         auto copy = std::make_shared<TableElement>();
         copy->id = table->id;
-        copy->bounds = table->bounds;
+        copy->origin = table->origin;
         copy->rotation = table->rotation;
         copy->rows = table->rows;
         copy->cols = table->cols;
         copy->width = table->width;
         copy->color = table->color;
+        copy->minCellW = table->minCellW;
+        copy->minCellH = table->minCellH;
         copy->cells.clear();
         copy->cells.resize(table->cells.size());
         for (size_t i = 0; i < table->cells.size(); ++i)
