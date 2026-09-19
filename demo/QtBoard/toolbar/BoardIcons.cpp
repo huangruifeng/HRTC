@@ -204,6 +204,83 @@ void drawHighlighter(QPainter& p, const QColor& c) {
     p.drawLine(QPointF(21.5, 25.5), QPointF(15.0, 32.0));
 }
 
+// 图形：圆 + 矩形叠加（形状工具入口）
+void drawShape(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QRectF(10.0, 10.0, 20.0, 20.0));
+    p.drawRect(QRectF(18.0, 18.0, 20.0, 20.0));
+}
+
+// 思维导图：中心节点 + 三个环绕节点 + 连线
+void drawMindMap(QPainter& p, const QColor& c) {
+    const QPointF center(24.0, 24.0);
+    const QPointF nodes[3] = { QPointF(12.5, 13.5), QPointF(12.5, 34.5),
+                               QPointF(35.5, 24.0) };
+    p.setPen(iconPen(c, 2.6));
+    p.setBrush(Qt::NoBrush);
+    for (const QPointF& n : nodes)
+        p.drawLine(center, n);
+    p.setPen(iconPen(c, 3.0));
+    p.drawEllipse(center, 6.0, 6.0);
+    for (const QPointF& n : nodes)
+        p.drawEllipse(n, 4.0, 4.0);
+}
+
+// 表格：外框 + 中横线 + 中竖线（2x2 网格）
+void drawTable(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawRect(QRectF(11.0, 13.0, 26.0, 22.0));
+    p.drawLine(QPointF(11.0, 24.0), QPointF(37.0, 24.0));
+    p.drawLine(QPointF(24.0, 13.0), QPointF(24.0, 35.0));
+}
+
+// 文字：字母 T 线稿（顶横杆 + 竖杆，底部基线短划提示输入）
+void drawTextGlyph(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawLine(QPointF(12.0, 12.5), QPointF(36.0, 12.5));
+    p.drawLine(QPointF(24.0, 12.5), QPointF(24.0, 33.5));
+    p.setPen(iconPen(c, 2.4));
+    p.drawLine(QPointF(15.0, 38.0), QPointF(33.0, 38.0));
+}
+
+// 小工具：秒表线稿（圆盘 + 顶冠钮 + 右上侧柄 + 指针）
+void drawWidget(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QRectF(10.5, 14.0, 27.0, 27.0));  // 圆盘（圆心 24, 27.5）
+
+    // 顶冠钮：顶部圆角小方块
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawRoundedRect(QRectF(20.5, 9.0, 7.0, 5.0), 2.0, 2.0);
+
+    // 右上侧柄（秒表按钮）
+    p.setPen(iconPen(c, 3.2));
+    p.drawLine(QPointF(34.2, 16.6), QPointF(37.4, 13.4));
+
+    // 指针：向上主针 + 右下副针
+    p.setPen(iconPen(c, 2.6));
+    p.drawLine(QPointF(24.0, 27.5), QPointF(24.0, 19.5));
+    p.drawLine(QPointF(24.0, 27.5), QPointF(29.0, 30.0));
+}
+
+// 其他：2x2 圆角方块网格（图形/导图/表格/文字/小工具汇总入口）
+void drawOther(QPainter& p, const QColor& c) {
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    const qreal s = 13.0;    // 方块边长
+    const qreal gap = 3.5;   // 方块间距
+    const qreal x0 = 24.0 - (s + gap / 2.0);
+    const qreal y0 = 24.0 - (s + gap / 2.0);
+    p.drawRoundedRect(QRectF(x0, y0, s, s), 3.0, 3.0);
+    p.drawRoundedRect(QRectF(x0 + s + gap, y0, s, s), 3.0, 3.0);
+    p.drawRoundedRect(QRectF(x0, y0 + s + gap, s, s), 3.0, 3.0);
+    p.drawRoundedRect(QRectF(x0 + s + gap, y0 + s + gap, s, s), 3.0, 3.0);
+}
+
 }  // namespace
 
 QPixmap pixmap(Glyph glyph, bool active) {
@@ -257,6 +334,24 @@ QPixmap pixmap(Glyph glyph, bool active) {
             break;
         case Glyph::Highlighter:
             drawHighlighter(p, color);
+            break;
+        case Glyph::Shape:
+            drawShape(p, color);
+            break;
+        case Glyph::MindMap:
+            drawMindMap(p, color);
+            break;
+        case Glyph::Table:
+            drawTable(p, color);
+            break;
+        case Glyph::Text:
+            drawTextGlyph(p, color);
+            break;
+        case Glyph::Widget:
+            drawWidget(p, color);
+            break;
+        case Glyph::Other:
+            drawOther(p, color);
             break;
     }
     return pm;

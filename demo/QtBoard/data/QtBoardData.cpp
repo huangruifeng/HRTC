@@ -4,6 +4,7 @@
 #include <chrono>
 #include <utility>
 
+#include "Whiteboard/command/element_commands.h"
 #include "Whiteboard/command/eraser_commands.h"
 #include "Whiteboard/command/page_commands.h"
 #include "Whiteboard/command/preview_commands.h"
@@ -36,6 +37,114 @@ whiteboard::Rect PointsToRect(const std::vector<whiteboard::Point>& pts) {
         maxy = std::max(maxy, p.y);
     }
     return whiteboard::Rect(minx, miny, maxx - minx + 1, maxy - miny + 1);
+}
+
+// ---------- 元素归属/递归定位助手（页面级 + 表格单元格，任意深度） ----------
+
+// 递归收集表格的全部后代 id（深度优先，不含表格自身）
+void CollectTableChildIds(const std::shared_ptr<whiteboard::Element>& e,
+                          std::vector<std::string>& out) {
+    auto* table = dynamic_cast<whiteboard::TableElement*>(e.get());
+    if (!table)
+        return;
+    for (auto& cell : table->cells) {
+        for (auto& child : cell) {
+            if (!child)
+                continue;
+            out.push_back(child->id);
+            CollectTableChildIds(child, out);
+        }
+    }
+}
+
+// 递归查找 id 对应元素指针（只读/写回均可用；未找到返回 nullptr）
+whiteboard::Element* FindElementInList(
+    const std::list<std::shared_ptr<whiteboard::Element>>& list,
+    const std::string& id) {
+    for (const auto& e : list) {
+        if (!e)
+            continue;
+        if (e->id == id)
+            return e.get();
+        if (auto* table = dynamic_cast<whiteboard::TableElement*>(e.get())) {
+            for (auto& cell : table->cells) {
+                if (auto* found = FindElementInList(cell, id))
+                    return found;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// 递归删除单个 id（页面级 / 表格单元格内）；删除表格时先把全部后代 id 收集到 cascaded。
+// 返回是否有删除发生。
+bool RemoveElementById(std::list<std::shared_ptr<whiteboard::Element>>& list,
+                       const std::string& id, std::vector<std::string>* cascaded) {
+    for (auto it = list.begin(); it != list.end(); ++it) {
+        if ((*it)->id == id) {
+            if (cascaded && dynamic_cast<whiteboard::TableElement*>(it->get()))
+                CollectTableChildIds(*it, *cascaded);
+            list.erase(it);
+            return true;
+        }
+        if (auto* table = dynamic_cast<whiteboard::TableElement*>(it->get())) {
+            for (auto& cell : table->cells) {
+                if (RemoveElementById(cell, id, cascaded))
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+// 按 parentId + cellIndex 把元素落位到指定表格单元格（任意深度）；成功返回 true
+bool PlaceInTableById(std::list<std::shared_ptr<whiteboard::Element>>& list,
+                      const std::string& parentId, int cellIndex,
+                      const std::shared_ptr<whiteboard::Element>& element) {
+    for (auto& e : list) {
+        if (e->id == parentId) {
+            auto* table = dynamic_cast<whiteboard::TableElement*>(e.get());
+            if (!table || cellIndex < 0 || cellIndex >= static_cast<int>(table->cells.size()))
+                return false;
+            table->cells[cellIndex].push_back(element);
+            return true;
+        }
+        if (auto* table = dynamic_cast<whiteboard::TableElement*>(e.get())) {
+            for (auto& cell : table->cells) {
+                if (PlaceInTableById(cell, parentId, cellIndex, element))
+                    return true;
+            }
+        }
+    }
+    return false;
+}
+
+// 起点归属：若起点落在某表格单元格内，把元素放入该单元格并返回 true（
+// 双端确定性重放的通用归属助手；v1 仅画笔笔迹使用）。out 非空时回填归属位置。
+bool AdoptIntoTableInList(std::list<std::shared_ptr<whiteboard::Element>>& list,
+                          const whiteboard::Point& start,
+                          const std::shared_ptr<whiteboard::Element>& element,
+                          whiteboard::EraserPlacement* out) {
+    for (auto& e : list) {
+        auto* table = dynamic_cast<whiteboard::TableElement*>(e.get());
+        if (!table)
+            continue;
+        const int ci = table->CellIndexAt(start);
+        if (ci >= 0 && ci < static_cast<int>(table->cells.size())) {
+            table->cells[ci].push_back(element);
+            if (out) {
+                out->parentId = table->id;
+                out->cellIndex = ci;
+            }
+            return true;
+        }
+        // 外层未命中：深入单元格内的嵌套表格
+        for (auto& cell : table->cells) {
+            if (AdoptIntoTableInList(cell, start, element, out))
+                return true;
+        }
+    }
+    return false;
 }
 }  // namespace
 
@@ -102,6 +211,8 @@ std::shared_ptr<whiteboard::Page>& QtBoardData::CurrentPage() {
 // 操作前快照：把当前页深拷贝压入 undo 栈（上限 20），并清空 redo 栈。
 // 仅数据线程调用。
 void QtBoardData::PushSnapshot() {
+    if (batchSuppress_)
+        return;  // 批量操作中：快照已在 BeginBatch 时记录
     auto& h = histories_[CurrentPage()->pageId];
     h.undo.push_back(CurrentPage()->Clone());
     while (h.undo.size() > kHistoryLimit)
@@ -109,11 +220,27 @@ void QtBoardData::PushSnapshot() {
     h.redo.clear();
 }
 
+// ---------- 批量快照（撤销粒度合并） ----------
+// BeginBatch：首个调用产生一次快照并进入抑制态；嵌套调用保持已有快照不重复。
+void QtBoardData::BeginBatch() {
+    thread_->BeginInvoke([this]() {
+        if (batchSuppress_)
+            return;
+        PushSnapshot();
+        batchSuppress_ = true;
+    });
+}
+
+void QtBoardData::EndBatch() {
+    thread_->BeginInvoke([this]() { batchSuppress_ = false; });
+}
+
 // 丢弃未完成笔画与橡皮增量（切页/撤销/重做/同步后调用）。仅数据线程调用。
 void QtBoardData::ResetTransientState() {
     strokes_.clear();
     eraserRemoved_.clear();
     eraserAdded_.clear();
+    eraserAddedPlacements_.clear();
 }
 
 void QtBoardData::ReplaceStrokePoints(whiteboard::Stroke& stroke,
@@ -171,9 +298,16 @@ void QtBoardData::PenEnd(const whiteboard::Point& p, int sessionId) {
             return;
         it->second.Append(p);
         const std::vector<whiteboard::Point> pts = it->second.points;
-        CurrentPage()->Append(it->second);
+        auto stroke = std::make_shared<whiteboard::Stroke>(it->second);
         const std::string id = it->second.id;
         strokes_.erase(it);
+
+        // 起点落在某表格单元格内则归属该单元格（双端确定性重放），否则页面级追加
+        whiteboard::EraserPlacement placement;
+        if (!pts.empty() && AdoptIntoTableInList(CurrentPage()->elements, pts.front(), stroke, &placement))
+        { /* 已入格 */ }
+        else
+            CurrentPage()->Append(stroke);
 
         auto cmd = std::make_shared<whiteboard::StrokeEnd>();
         cmd->pageId = CurrentPage()->pageId;
@@ -183,7 +317,7 @@ void QtBoardData::PenEnd(const whiteboard::Point& p, int sessionId) {
             onOutgoingCmd_(std::move(cmd));
 
         if (onStrokeCommitted_)
-            onStrokeCommitted_(pendingToken_, id);
+            onStrokeCommitted_(pendingToken_, id, placement.parentId, placement.cellIndex);
     });
 }
 
@@ -196,6 +330,8 @@ void QtBoardData::EraserBegin(const whiteboard::Rect& rc, int sessionId) {
         whiteboard::EraserResult r = CurrentPage()->Eraser(rc, sessionId);
         eraserRemoved_.insert(r.removedIds.begin(), r.removedIds.end());
         eraserAdded_.insert(eraserAdded_.end(), r.addedElements.begin(), r.addedElements.end());
+        eraserAddedPlacements_.insert(eraserAddedPlacements_.end(),
+                                      r.addedPlacements.begin(), r.addedPlacements.end());
 
         auto cmd = std::make_shared<whiteboard::EraserBegin>();
         cmd->pageId = CurrentPage()->pageId;
@@ -215,6 +351,8 @@ void QtBoardData::EraserMove(const whiteboard::Rect& rc, int sessionId) {
         whiteboard::EraserResult r = CurrentPage()->Eraser(rc, sessionId);
         eraserRemoved_.insert(r.removedIds.begin(), r.removedIds.end());
         eraserAdded_.insert(eraserAdded_.end(), r.addedElements.begin(), r.addedElements.end());
+        eraserAddedPlacements_.insert(eraserAddedPlacements_.end(),
+                                      r.addedPlacements.begin(), r.addedPlacements.end());
 
         auto cmd = std::make_shared<whiteboard::EraserMove>();
         cmd->pageId = CurrentPage()->pageId;
@@ -234,6 +372,8 @@ void QtBoardData::EraserEnd(const whiteboard::Rect& rc, int sessionId) {
         whiteboard::EraserResult r = CurrentPage()->Eraser(rc, sessionId);
         eraserRemoved_.insert(r.removedIds.begin(), r.removedIds.end());
         eraserAdded_.insert(eraserAdded_.end(), r.addedElements.begin(), r.addedElements.end());
+        eraserAddedPlacements_.insert(eraserAddedPlacements_.end(),
+                                      r.addedPlacements.begin(), r.addedPlacements.end());
 
         // 收集本次拖动全部增量（含最终回调），作为 EraserEnd 命令内容
         auto result = FlushEraser(true);
@@ -241,31 +381,38 @@ void QtBoardData::EraserEnd(const whiteboard::Rect& rc, int sessionId) {
         auto cmd = std::make_shared<whiteboard::EraserEnd>();
         cmd->pageId = CurrentPage()->pageId;
         cmd->sessionId = sid;
-        cmd->removedIds = std::move(result.first);
-        cmd->addedElements = std::move(result.second);
+        cmd->removedIds = std::move(result.removedIds);
+        cmd->addedElements = std::move(result.addedElements);
+        cmd->addedPlacements = std::move(result.addedPlacements);
         if (onOutgoingCmd_)
             onOutgoingCmd_(std::move(cmd));
     });
 }
 
 // 收集橡皮增量：过滤已被后续擦除删除的碎片后回调；clearAccum 为 true 时清空累积。
-// 返回过滤结果（供 EraserEnd 命令负载）。
-std::pair<std::vector<std::string>, std::vector<std::shared_ptr<whiteboard::Element>>>
-QtBoardData::FlushEraser(bool clearAccum) {
-    std::vector<std::string> removed(eraserRemoved_.begin(), eraserRemoved_.end());
-    std::vector<std::shared_ptr<whiteboard::Element>> added;
-    for (auto& e : eraserAdded_) {
+// 返回过滤结果（供 EraserEnd 命令负载；addedPlacements 与 addedElements 对齐）。
+QtBoardData::EraserDelta QtBoardData::FlushEraser(bool clearAccum) {
+    EraserDelta delta;
+    delta.removedIds.assign(eraserRemoved_.begin(), eraserRemoved_.end());
+    for (size_t i = 0; i < eraserAdded_.size(); ++i) {
+        auto& e = eraserAdded_[i];
         // 碎片可能在后续擦除中又被删掉，以 removed 为准过滤
-        if (eraserRemoved_.count(e->id) == 0)
-            added.push_back(e);
+        if (eraserRemoved_.count(e->id) != 0)
+            continue;
+        delta.addedElements.push_back(e);
+        if (i < eraserAddedPlacements_.size())
+            delta.addedPlacements.push_back(eraserAddedPlacements_[i]);
+        else
+            delta.addedPlacements.push_back(whiteboard::EraserPlacement());  // 防御：无归属记录视为页面级
     }
     if (clearAccum) {
         eraserRemoved_.clear();
         eraserAdded_.clear();
+        eraserAddedPlacements_.clear();
     }
     if (onElementsChanged_)
-        onElementsChanged_(removed, added);
-    return { std::move(removed), std::move(added) };
+        onElementsChanged_(delta.removedIds, delta.addedElements, delta.addedPlacements);
+    return delta;
 }
 
 // ---------- 本地其他操作（产生对应命令） ----------
@@ -304,6 +451,371 @@ void QtBoardData::UpdateStroke(const std::string& id,
         cmd->points = points;
         if (onOutgoingCmd_)
             onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+// ---------- 新增元素（图形/思维导图/表格）：本地操作 ----------
+
+void QtBoardData::AddElement(std::shared_ptr<whiteboard::Element> element) {
+    thread_->BeginInvoke([this, element]() {
+        if (!element)
+            return;
+        PushSnapshot();
+        CurrentPage()->Append(element);
+
+        auto cmd = std::make_shared<whiteboard::ElementAdd>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = element;
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+
+        if (onElementsChanged_) {
+            std::vector<std::string> removed;
+            std::vector<std::shared_ptr<whiteboard::Element>> added = { element };
+            onElementsChanged_(std::move(removed), std::move(added), {});
+        }
+    });
+}
+
+void QtBoardData::RemoveElements(const std::vector<std::string>& ids) {
+    thread_->BeginInvoke([this, ids]() {
+        if (ids.empty())
+            return;
+        // 先探测任一 id 是否存在（不存在则不产生快照/命令/回调）
+        bool any = false;
+        for (const auto& id : ids) {
+            if (FindElementInList(CurrentPage()->elements, id)) {
+                any = true;
+                break;
+            }
+        }
+        if (!any)
+            return;
+
+        PushSnapshot();
+
+        std::vector<std::string> removedAll;
+        std::vector<std::string> broadcastIds;
+        for (const auto& id : ids) {
+            std::vector<std::string> cascaded;
+            if (RemoveElementById(CurrentPage()->elements, id, &cascaded)) {
+                broadcastIds.push_back(id);
+                removedAll.push_back(id);
+                removedAll.insert(removedAll.end(), cascaded.begin(), cascaded.end());
+            }
+        }
+
+        // 每个顶层 id 广播一次 ElementRemove（表格由远端递归删除时自行级联）
+        for (const auto& id : broadcastIds) {
+            auto cmd = std::make_shared<whiteboard::ElementRemove>();
+            cmd->pageId = CurrentPage()->pageId;
+            cmd->elementId = id;
+            if (onOutgoingCmd_)
+                onOutgoingCmd_(std::move(cmd));
+        }
+
+        if (!removedAll.empty() && onElementsChanged_)
+            onElementsChanged_(removedAll, {}, {});
+    });
+}
+
+void QtBoardData::UpdateGraphicGeometry(const std::string& id,
+                                        const std::vector<whiteboard::Subpath>& subpaths) {
+    thread_->BeginInvoke([this, id, subpaths]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* graphic = dynamic_cast<whiteboard::GraphicElement*>(found);
+        if (!graphic)
+            return;
+        PushSnapshot();  // 变换烘焙是一次可撤销操作
+        graphic->subpaths = subpaths;
+        graphic->Rebuild();
+
+        // 静默写回：不触发 onElementsChanged（UI 已自行更新），仅广播给远端
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::GraphicElement>(*graphic);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+void QtBoardData::UpdateTableGeometry(const std::string& id, const whiteboard::Rect& bounds,
+                                      float rotation) {
+    thread_->BeginInvoke([this, id, bounds, rotation]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* table = dynamic_cast<whiteboard::TableElement*>(found);
+        if (!table)
+            return;
+        PushSnapshot();  // 变换烘焙是一次可撤销操作
+        table->bounds = bounds;
+        table->rotation = rotation;
+
+        // 静默写回：不触发 onElementsChanged（UI 已自行更新），仅广播给远端
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::TableElement>(*table);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+// ---------- 文字元素 ----------
+
+void QtBoardData::UpdateTextGeometry(const std::string& id, int x, int y, int fontSize,
+                                     float rotation) {
+    thread_->BeginInvoke([this, id, x, y, fontSize, rotation]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* text = dynamic_cast<whiteboard::TextElement*>(found);
+        if (!text)
+            return;
+        PushSnapshot();  // 变换烘焙是一次可撤销操作
+        text->x = x;
+        text->y = y;
+        text->fontSize = fontSize;
+        text->rotation = rotation;
+
+        // 静默写回：不触发 onElementsChanged（UI 已自行更新），仅广播给远端
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::TextElement>(*text);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+void QtBoardData::UpdateTextContent(const std::string& id, const std::string& text) {
+    thread_->BeginInvoke([this, id, text]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* element = dynamic_cast<whiteboard::TextElement*>(found);
+        if (!element)
+            return;
+        PushSnapshot();  // 内容编辑是一次可撤销操作
+        element->text = text;
+
+        // 深拷贝快照（脱离数据线程活对象）+ removed/added 重建路径，
+        // UI 与远端走同一路径（复用选中态恢复逻辑）
+        auto snapshot = whiteboard::CloneElement(*element);
+        if (!snapshot)
+            return;
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = snapshot;
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+        if (onElementsChanged_) {
+            std::vector<std::string> removed = { id };
+            std::vector<std::shared_ptr<whiteboard::Element>> added = { snapshot };
+            onElementsChanged_(std::move(removed), std::move(added), {});
+        }
+    });
+}
+
+// ---------- 小工具元素 ----------
+
+void QtBoardData::UpdateWidgetGeometry(const std::string& id, int x, int y, float scale) {
+    thread_->BeginInvoke([this, id, x, y, scale]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* widget = dynamic_cast<whiteboard::WidgetElement*>(found);
+        if (!widget)
+            return;
+        PushSnapshot();  // 变换烘焙是一次可撤销操作
+        widget->x = x;
+        widget->y = y;
+        widget->scale = scale;
+
+        // 静默写回：不触发 onElementsChanged（UI 已自行更新），仅广播给远端
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::WidgetElement>(*widget);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+// 计时器时长写回（静默：不入撤销栈——滚轮逐格调整会刷爆历史；点开始时一次提交）
+void QtBoardData::UpdateWidgetDuration(const std::string& id, int durationSec) {
+    thread_->BeginInvoke([this, id, durationSec]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* widget = dynamic_cast<whiteboard::WidgetElement*>(found);
+        if (!widget)
+            return;
+        widget->durationSec = durationSec < 1 ? 1 : durationSec;
+
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::WidgetElement>(*widget);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+// 骰子参数写回（静默：设置态点确定时一次提交，不入撤销栈）
+void QtBoardData::UpdateWidgetDiceParams(const std::string& id, int sides, int count) {
+    thread_->BeginInvoke([this, id, sides, count]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* widget = dynamic_cast<whiteboard::WidgetElement*>(found);
+        if (!widget)
+            return;
+        widget->diceSides = sides;
+        widget->diceCount = count < 1 ? 1 : (count > 10 ? 10 : count);
+
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::WidgetElement>(*widget);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+// 转盘/点名器候选项写回（编辑弹窗提交）：PushSnapshot → 改 options → 深拷贝
+// 快照广播 + removed/added 重建路径，UI 与远端走同一路径（可撤销）
+void QtBoardData::UpdateWidgetOptions(const std::string& id, const std::string& options) {
+    thread_->BeginInvoke([this, id, options]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* widget = dynamic_cast<whiteboard::WidgetElement*>(found);
+        if (!widget)
+            return;
+        PushSnapshot();  // 内容编辑是一次可撤销操作
+        widget->options = options;
+
+        auto snapshot = whiteboard::CloneElement(*widget);
+        if (!snapshot)
+            return;
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = snapshot;
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+        if (onElementsChanged_) {
+            std::vector<std::string> removed = { id };
+            std::vector<std::shared_ptr<whiteboard::Element>> added = { snapshot };
+            onElementsChanged_(std::move(removed), std::move(added), {});
+        }
+    });
+}
+
+// 去重模式开关写回（静默：不入撤销栈）
+void QtBoardData::UpdateWidgetDedup(const std::string& id, bool dedup) {
+    thread_->BeginInvoke([this, id, dedup]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* widget = dynamic_cast<whiteboard::WidgetElement*>(found);
+        if (!widget)
+            return;
+        widget->dedup = dedup;
+
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::WidgetElement>(*widget);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+// 点名器一次抽取人数写回（静默：不入撤销栈；范围 1~5）
+void QtBoardData::UpdateWidgetPickCount(const std::string& id, int pickCount) {
+    thread_->BeginInvoke([this, id, pickCount]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* widget = dynamic_cast<whiteboard::WidgetElement*>(found);
+        if (!widget)
+            return;
+        widget->pickCount = pickCount < 1 ? 1 : (pickCount > 5 ? 5 : pickCount);
+
+        auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->element = std::make_shared<whiteboard::WidgetElement>(*widget);
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+    });
+}
+
+// ---------- 思维导图（树状结构操作） ----------
+
+// 变更收尾：深拷贝快照（含节点树，脱离数据线程活对象，防远端序列化/UI 读取竞态），
+// 广播 ElementUpdate + removed={id}/added={快照} 增量回调，UI 与远端同一重建路径。
+void QtBoardData::NotifyMindMapChanged(const whiteboard::MindMapElement& mind) {
+    auto snapshot = whiteboard::CloneElement(mind);
+    if (!snapshot)
+        return;
+
+    auto cmd = std::make_shared<whiteboard::ElementUpdate>();
+    cmd->pageId = CurrentPage()->pageId;
+    cmd->element = snapshot;
+    if (onOutgoingCmd_)
+        onOutgoingCmd_(std::move(cmd));
+
+    if (onElementsChanged_) {
+        std::vector<std::string> removed = { mind.id };
+        std::vector<std::shared_ptr<whiteboard::Element>> added = { snapshot };
+        onElementsChanged_(std::move(removed), std::move(added), {});
+    }
+}
+
+void QtBoardData::UpdateMindMapGeometry(const std::string& id, const whiteboard::Point& root,
+                                        float scaleX, float scaleY, float rotation) {
+    thread_->BeginInvoke([this, id, root, scaleX, scaleY, rotation]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* mind = dynamic_cast<whiteboard::MindMapElement*>(found);
+        if (!mind)
+            return;
+        PushSnapshot();  // 变换烘焙是一次可撤销操作
+        mind->root = root;
+        mind->scaleX = scaleX;
+        mind->scaleY = scaleY;
+        mind->rotation = rotation;
+        NotifyMindMapChanged(*mind);
+    });
+}
+
+void QtBoardData::MindMapToggleNode(const std::string& id, const std::string& nodeId) {
+    thread_->BeginInvoke([this, id, nodeId]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* mind = dynamic_cast<whiteboard::MindMapElement*>(found);
+        if (!mind)
+            return;
+        auto* node = mind->FindNode(nodeId);
+        if (!node)
+            return;
+        PushSnapshot();  // 展开/收缩是一次可撤销操作
+        node->collapsed = !node->collapsed;
+        NotifyMindMapChanged(*mind);
+    });
+}
+
+void QtBoardData::MindMapAddChild(const std::string& id, const std::string& nodeId) {
+    thread_->BeginInvoke([this, id, nodeId]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* mind = dynamic_cast<whiteboard::MindMapElement*>(found);
+        if (!mind)
+            return;
+        auto* node = mind->FindNode(nodeId);
+        if (!node)
+            return;
+        PushSnapshot();  // 添加节点是一次可撤销操作
+        auto child = std::make_shared<whiteboard::MindNode>();
+        child->id = whiteboard::MakeMindNodeId();
+        node->children.push_back(child);
+        node->collapsed = false;  // 父节点若处于折叠态则展开，确保新节点可见
+        NotifyMindMapChanged(*mind);
+    });
+}
+
+void QtBoardData::MindMapRemoveNode(const std::string& id, const std::string& nodeId) {
+    thread_->BeginInvoke([this, id, nodeId]() {
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        auto* mind = dynamic_cast<whiteboard::MindMapElement*>(found);
+        if (!mind)
+            return;
+        auto* parent = mind->FindParent(nodeId);  // 根节点返回 nullptr → 拒绝
+        if (!parent)
+            return;
+        PushSnapshot();  // 删除节点子树是一次可撤销操作
+        auto& children = parent->children;
+        children.erase(std::remove_if(children.begin(), children.end(),
+                                          [&nodeId](const std::shared_ptr<whiteboard::MindNode>& c) {
+                                              return c && c->id == nodeId;
+                                          }),
+                       children.end());
+        NotifyMindMapChanged(*mind);
     });
 }
 
@@ -387,8 +899,9 @@ std::string QtBoardData::CreatePage() {
         auto page = std::make_shared<whiteboard::Page>();
         page->pageId = GeneratePageId();
         page->EnableEraserInsert(true);
-        pages_.push_back(page);
-        currentPage_ = pages_.size() - 1;
+        // 新页插入到当前页之后（第 N 页添加时新页成为第 N+1 页），而非追加到末尾
+        pages_.insert(pages_.begin() + currentPage_ + 1, page);
+        currentPage_ += 1;
         ResetTransientState();
         id = page->pageId;
 
@@ -479,13 +992,21 @@ void QtBoardData::RemoteStrokeEnd(const std::string& strokeId,
         if (it == strokes_.end())
             return;
         ReplaceStrokePoints(it->second, points);
-        CurrentPage()->Append(it->second);
         auto stroke = std::make_shared<whiteboard::Stroke>(it->second);
         strokes_.erase(it);
+
+        // 与本地 PenEnd 同套归属规则：起点落在某表格单元格内则归入该单元格
+        whiteboard::EraserPlacement placement;
+        if (!points.empty() && AdoptIntoTableInList(CurrentPage()->elements, points.front(), stroke, &placement))
+        { /* 已入格 */ }
+        else
+            CurrentPage()->Append(stroke);
+
         if (onElementsChanged_) {
             std::vector<std::string> removed;
             std::vector<std::shared_ptr<whiteboard::Element>> added = { stroke };
-            onElementsChanged_(std::move(removed), std::move(added));
+            std::vector<whiteboard::EraserPlacement> placements = { placement };
+            onElementsChanged_(std::move(removed), std::move(added), std::move(placements));
         }
     });
 }
@@ -512,25 +1033,33 @@ void QtBoardData::RemoteEraserMove(const std::string& sessionId,
 void QtBoardData::RemoteEraserEnd(
     const std::string& sessionId,
     const std::vector<std::string>& removedIds,
-    const std::vector<std::shared_ptr<whiteboard::Element>>& addedElements) {
-    thread_->BeginInvoke([this, sessionId, removedIds, addedElements]() {
+    const std::vector<std::shared_ptr<whiteboard::Element>>& addedElements,
+    const std::vector<whiteboard::EraserPlacement>& addedPlacements) {
+    thread_->BeginInvoke([this, sessionId, removedIds, addedElements, addedPlacements]() {
         PushSnapshot();  // 一次远程擦除拖动记录一个快照
         auto& elems = CurrentPage()->elements;
-        for (const auto& id : removedIds) {
-            elems.erase(std::remove_if(elems.begin(), elems.end(),
-                                       [&id](const std::shared_ptr<whiteboard::Element>& e) {
-                                           return e->id == id;
-                                       }),
-                        elems.end());
+        // 递归删除（含表格单元格内被擦的碎片）
+        for (const auto& id : removedIds)
+            RemoveElementById(elems, id, nullptr);
+        // 碎片按归属落位（parentId 空或定位失败则页面级追加）；effective 回传实际归属
+        std::vector<whiteboard::EraserPlacement> effective(addedElements.size());
+        for (size_t i = 0; i < addedElements.size(); ++i) {
+            const auto& e = addedElements[i];
+            bool placed = false;
+            if (i < addedPlacements.size() && !addedPlacements[i].parentId.empty())
+                placed = PlaceInTableById(elems, addedPlacements[i].parentId,
+                                          addedPlacements[i].cellIndex, e);
+            if (!placed)
+                elems.push_back(e);
+            else if (i < addedPlacements.size())
+                effective[i] = addedPlacements[i];
         }
-        for (const auto& e : addedElements)
-            elems.push_back(e);
 
         // 清除橡皮预览（UI 先恢复被隐藏的图元，再按下方增量精确删/加）
         if (onToolPreview_)
             onToolPreview_(1, sessionId, {}, {});
         if (onElementsChanged_ && (!removedIds.empty() || !addedElements.empty()))
-            onElementsChanged_(removedIds, addedElements);
+            onElementsChanged_(removedIds, addedElements, effective);
     });
 }
 
@@ -584,21 +1113,73 @@ void QtBoardData::RemoteUpdateStroke(const std::string& id,
     thread_->BeginInvoke([this, id, points]() {
         PushSnapshot();
         CurrentPage()->UpdateStroke(id, points);
-        // 找到更新后的笔画并作为 added 增量回调（removed={id} 保证 UI 先删旧图元）
+        // 找到更新后的笔画并作为 added 增量回调（removed={id} 保证 UI 先删旧图元）；
+        // 递归查我：表格单元格内的笔迹更新同样回调
         std::shared_ptr<whiteboard::Element> updated;
-        for (const auto& e : CurrentPage()->elements) {
-            if (e->id == id && dynamic_cast<const whiteboard::Stroke*>(e.get())) {
-                updated = std::make_shared<whiteboard::Stroke>(
-                    *static_cast<const whiteboard::Stroke*>(e.get()));
-                break;
-            }
-        }
+        auto* found = FindElementInList(CurrentPage()->elements, id);
+        if (auto* stroke = dynamic_cast<whiteboard::Stroke*>(found))
+            updated = std::make_shared<whiteboard::Stroke>(*stroke);
         if (onElementsChanged_) {
             std::vector<std::string> removed = { id };
             std::vector<std::shared_ptr<whiteboard::Element>> added;
             if (updated)
                 added.push_back(updated);
-            onElementsChanged_(std::move(removed), std::move(added));
+            onElementsChanged_(std::move(removed), std::move(added), {});
+        }
+    });
+}
+
+// ---------- 远程元素增删改（不产生命令） ----------
+
+void QtBoardData::RemoteAddElement(const std::shared_ptr<whiteboard::Element>& element) {
+    thread_->BeginInvoke([this, element]() {
+        if (!element)
+            return;
+        PushSnapshot();
+        CurrentPage()->Append(element);
+        if (onElementsChanged_) {
+            std::vector<std::string> removed;
+            std::vector<std::shared_ptr<whiteboard::Element>> added = { element };
+            onElementsChanged_(std::move(removed), std::move(added), {});
+        }
+    });
+}
+
+void QtBoardData::RemoteRemoveElements(const std::vector<std::string>& ids) {
+    thread_->BeginInvoke([this, ids]() {
+        if (ids.empty())
+            return;
+        bool any = false;
+        for (const auto& id : ids) {
+            if (FindElementInList(CurrentPage()->elements, id)) {
+                any = true;
+                break;
+            }
+        }
+        if (!any)
+            return;
+
+        PushSnapshot();
+        for (const auto& id : ids)
+            RemoveElementById(CurrentPage()->elements, id, nullptr);
+
+        if (onElementsChanged_)
+            onElementsChanged_(ids, {}, {});
+    });
+}
+
+void QtBoardData::RemoteUpdateElement(const std::shared_ptr<whiteboard::Element>& element) {
+    thread_->BeginInvoke([this, element]() {
+        if (!element)
+            return;
+        PushSnapshot();
+        // 原位替换：先递归删除同 id（含表格嵌套位置），再页面级追加
+        RemoveElementById(CurrentPage()->elements, element->id, nullptr);
+        CurrentPage()->Append(element);
+        if (onElementsChanged_) {
+            std::vector<std::string> removed = { element->id };
+            std::vector<std::shared_ptr<whiteboard::Element>> added = { element };
+            onElementsChanged_(std::move(removed), std::move(added), {});
         }
     });
 }
@@ -628,8 +1209,9 @@ void QtBoardData::RemoteCreatePage(const std::string& pageId) {
         auto page = std::make_shared<whiteboard::Page>();
         page->pageId = pageId;
         page->EnableEraserInsert(true);
-        pages_.push_back(page);
-        currentPage_ = pages_.size() - 1;
+        // 与本地 CreatePage 语义对齐：插入到当前页之后，保持双端页序一致
+        pages_.insert(pages_.begin() + currentPage_ + 1, page);
+        currentPage_ += 1;
         ResetTransientState();
         if (onPageChanged_)
             onPageChanged_();

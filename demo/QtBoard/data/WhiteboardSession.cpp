@@ -2,6 +2,7 @@
 
 #include <Base/ErrorCode.h>
 
+#include "Whiteboard/command/element_commands.h"
 #include "Whiteboard/command/eraser_commands.h"
 #include "Whiteboard/command/full_sync_command.h"
 #include "Whiteboard/command/page_commands.h"
@@ -142,13 +143,19 @@ void WhiteboardSession::DispatchCommand(const std::shared_ptr<whiteboard::Comman
     } else if (auto* c = dynamic_cast<whiteboard::EraserMove*>(cmd.get())) {
         data_.RemoteEraserMove(c->sessionId, c->points);
     } else if (auto* c = dynamic_cast<whiteboard::EraserEnd*>(cmd.get())) {
-        data_.RemoteEraserEnd(c->sessionId, c->removedIds, c->addedElements);
+        data_.RemoteEraserEnd(c->sessionId, c->removedIds, c->addedElements, c->addedPlacements);
     } else if (auto* c = dynamic_cast<whiteboard::LassoPreview*>(cmd.get())) {
         data_.RemoteLassoPreview(c->sessionId, c->points);
     } else if (auto* c = dynamic_cast<whiteboard::SelectionPreview*>(cmd.get())) {
         data_.RemoteSelectionPreview(c->sessionId, c->points, c->selectedIds);
     } else if (auto* c = dynamic_cast<whiteboard::StrokeUpdate*>(cmd.get())) {
         data_.RemoteUpdateStroke(c->strokeId, c->points);
+    } else if (auto* c = dynamic_cast<whiteboard::ElementAdd*>(cmd.get())) {
+        data_.RemoteAddElement(c->element);
+    } else if (auto* c = dynamic_cast<whiteboard::ElementRemove*>(cmd.get())) {
+        data_.RemoteRemoveElements({ c->elementId });
+    } else if (auto* c = dynamic_cast<whiteboard::ElementUpdate*>(cmd.get())) {
+        data_.RemoteUpdateElement(c->element);
     } else if (auto* c = dynamic_cast<whiteboard::PageCreate*>(cmd.get())) {
         data_.RemoteCreatePage(c->newPageId);
     } else if (dynamic_cast<whiteboard::PageSelect*>(cmd.get())) {

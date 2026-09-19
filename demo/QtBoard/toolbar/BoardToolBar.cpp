@@ -117,6 +117,16 @@ BoardToolBar::BoardToolBar(QWidget* parent) : QWidget(parent) {
     addTool(BoardView::Tool::Lasso, QStringLiteral("套索"),
             BoardIcons::pixmap(BoardIcons::Glyph::Lasso, false),
             BoardIcons::pixmap(BoardIcons::Glyph::Lasso, true));
+
+    // 其他：图形/导图/表格/文字/小工具汇总入口（非 checkable，仿 moreButton_；
+    // 点击弹出 OtherToolsPanel，激活态由 MainWindow 统一控制）
+    otherButton_ = createButton(
+        QStringLiteral("其他"),
+        BoardIcons::pixmap(BoardIcons::Glyph::Other, false),
+        BoardIcons::pixmap(BoardIcons::Glyph::Other, true), false);
+    leftLayout->addWidget(otherButton_);
+    connect(otherButton_, &QToolButton::clicked, this, &BoardToolBar::otherRequested);
+
     addTool(BoardView::Tool::Pan, QStringLiteral("抓手"),
             BoardIcons::pixmap(BoardIcons::Glyph::Hand, false),
             BoardIcons::pixmap(BoardIcons::Glyph::Hand, true));
@@ -236,10 +246,20 @@ BoardToolButton* BoardToolBar::createButton(const QString& text, const QPixmap& 
     return button;
 }
 
+// 同步工具选中态：工具按钮存在时点亮；图形/导图/表格/文字/小工具已移入
+// "其他"面板（无对应按钮）→ 清空工具组选中态（避免残留旧工具高亮）
 void BoardToolBar::setCurrentTool(BoardView::Tool tool) {
     BoardToolButton* button = toolButtons_.value(static_cast<int>(tool), nullptr);
-    if (button && !button->isChecked())
-        button->setChecked(true);
+    if (button) {
+        if (!button->isChecked())
+            button->setChecked(true);
+        return;
+    }
+    if (QAbstractButton* checked = toolGroup_->checkedButton()) {
+        toolGroup_->setExclusive(false);
+        checked->setChecked(false);
+        toolGroup_->setExclusive(true);
+    }
 }
 
 void BoardToolBar::setToolPanelExtended(BoardView::Tool tool, bool extended) {
@@ -273,12 +293,20 @@ void BoardToolBar::setMoreButtonActive(bool active) {
     moreButton_->setActiveState(active);
 }
 
+void BoardToolBar::setOtherButtonActive(bool active) {
+    otherButton_->setActiveState(active);
+}
+
 QRect BoardToolBar::pageButtonGlobalRect() const {
     return QRect(pageButton_->mapToGlobal(QPoint(0, 0)), pageButton_->size());
 }
 
 QRect BoardToolBar::moreButtonGlobalRect() const {
     return QRect(moreButton_->mapToGlobal(QPoint(0, 0)), moreButton_->size());
+}
+
+QRect BoardToolBar::otherButtonGlobalRect() const {
+    return QRect(otherButton_->mapToGlobal(QPoint(0, 0)), otherButton_->size());
 }
 
 QRect BoardToolBar::toolButtonGlobalRect(BoardView::Tool tool) const {

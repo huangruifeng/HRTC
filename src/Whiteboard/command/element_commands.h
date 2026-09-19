@@ -20,4 +20,12 @@ public:
     std::string elementId;
 };
 
+// 整元素按 id 替换（用于图形/表格变换烘焙的远端同步）。
+class ElementUpdate : public Command {
+public:
+    std::string GetType() const override { return "ElementUpdate"; }
+
+    std::shared_ptr<Element> element;
+};
+
 } // namespace whiteboard

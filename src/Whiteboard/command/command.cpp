@@ -24,6 +24,7 @@ std::map<std::string, CommandFactory>& Factories()
         { "EraserEnd",     []() -> std::shared_ptr<Command> { return std::make_shared<EraserEnd>(); } },
         { "ElementAdd",    []() -> std::shared_ptr<Command> { return std::make_shared<ElementAdd>(); } },
         { "ElementRemove", []() -> std::shared_ptr<Command> { return std::make_shared<ElementRemove>(); } },
+        { "ElementUpdate", []() -> std::shared_ptr<Command> { return std::make_shared<ElementUpdate>(); } },
         { "StrokeUpdate",  []() -> std::shared_ptr<Command> { return std::make_shared<StrokeUpdate>(); } },
         { "PageCreate",    []() -> std::shared_ptr<Command> { return std::make_shared<PageCreate>(); } },
         { "PageSelect",    []() -> std::shared_ptr<Command> { return std::make_shared<PageSelect>(); } },

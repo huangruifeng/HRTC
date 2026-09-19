@@ -59,12 +59,20 @@ std::string SerializeCommand(const Command& cmd)
     }
     else if (auto* c = dynamic_cast<const EraserEnd*>(&cmd))
     {
-        pk.pack_array(3);
+        pk.pack_array(4);
         pk.pack(c->sessionId);
         pk.pack(c->removedIds);
         pk.pack_array(static_cast<uint32_t>(c->addedElements.size()));
         for (const auto& e : c->addedElements)
             PackElement(pk, *e);
+        // 与 addedElements 一一对齐的归属负载：每个 [parentId, cellIndex]
+        pk.pack_array(static_cast<uint32_t>(c->addedPlacements.size()));
+        for (const auto& p : c->addedPlacements)
+        {
+            pk.pack_array(2);
+            pk.pack(p.parentId);
+            pk.pack(p.cellIndex);
+        }
     }
     else if (auto* c = dynamic_cast<const ElementAdd*>(&cmd))
     {
@@ -75,6 +83,11 @@ std::string SerializeCommand(const Command& cmd)
     {
         pk.pack_array(1);
         pk.pack(c->elementId);
+    }
+    else if (auto* c = dynamic_cast<const ElementUpdate*>(&cmd))
+    {
+        pk.pack_array(1);
+        PackElement(pk, *c->element);
     }
     else if (auto* c = dynamic_cast<const FullSync*>(&cmd))
     {
@@ -187,6 +200,25 @@ std::shared_ptr<Command> DeserializeCommand(const std::string& data)
             if (e)
                 c->addedElements.push_back(e);
         }
+
+        c->addedPlacements.clear();
+        if (payload.via.array.size >= 4)
+        {
+            const msgpack::object& placements = payload.via.array.ptr[3];
+            if (placements.type == msgpack::type::ARRAY)
+            {
+                for (uint32_t i = 0; i < placements.via.array.size; ++i)
+                {
+                    const msgpack::object& po = placements.via.array.ptr[i];
+                    if (po.type != msgpack::type::ARRAY || po.via.array.size != 2)
+                        continue;
+                    EraserPlacement p;
+                    po.via.array.ptr[0].convert(p.parentId);
+                    po.via.array.ptr[1].convert(p.cellIndex);
+                    c->addedPlacements.push_back(std::move(p));
+                }
+            }
+        }
     }
     else if (auto* c = dynamic_cast<ElementAdd*>(cmd.get()))
     {
@@ -195,6 +227,10 @@ std::shared_ptr<Command> DeserializeCommand(const std::string& data)
     else if (auto* c = dynamic_cast<ElementRemove*>(cmd.get()))
     {
         payload.via.array.ptr[0].convert(c->elementId);
+    }
+    else if (auto* c = dynamic_cast<ElementUpdate*>(cmd.get()))
+    {
+        c->element = UnpackElement(payload.via.array.ptr[0]);
     }
     else if (auto* c = dynamic_cast<FullSync*>(cmd.get()))
     {

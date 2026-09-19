@@ -24,4 +24,15 @@ bool RegisterElementFactory(const std::string& type, ElementFactory factory);
 // Creates an element instance from a type name; returns nullptr if unknown.
 std::shared_ptr<Element> CreateElement(const std::string& type);
 
+// 元素归属位置：parentId 为空 = 页面级；否则为所属表格元素的 id，
+// cellIndex 为单元格索引（row*cols+col）。橡皮擦碎片等新增元素用其标注归属。
+struct EraserPlacement {
+    std::string parentId;
+    int cellIndex = -1;
+};
+
+// 按具体类型深拷贝元素（Stroke/Graphic/Table/Page 递归；未知类型返回 nullptr）。
+// 供 Page::Clone 与表格单元格子元素深拷贝使用。
+std::shared_ptr<Element> CloneElement(const Element& e);
+
 }

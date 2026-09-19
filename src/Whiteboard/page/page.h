@@ -13,6 +13,9 @@ namespace whiteboard {
 struct EraserResult {
     std::vector<std::string> removedIds;                 // ids removed by this eraser pass
     std::vector<std::shared_ptr<Element>> addedElements; // new Stroke fragments created by this pass
+    // 与 addedElements 一一对齐的归属位置：parentId 空 = 页面级，
+    // 否则为表格 id + 单元格索引（远端需知碎片归属单元格）。
+    std::vector<EraserPlacement> addedPlacements;
 };
 
 class Page : public Element {
@@ -51,6 +54,11 @@ public:
 
 private:
     Point PointOfIntersection(const std::vector<Point>::iterator& it, const Rect& orc);
+
+    // 单列表擦除助手：原 Eraser 内笔画 diff 逻辑原样迁移（列表参数化）。
+    // parentId 空 = 页面级，否则为表格 id；碎片按同一归属写入 addedPlacements。
+    void EraseInList(std::list<std::shared_ptr<Element>>& list, const Rect& rc,
+                     EraserResult& result, const std::string& parentId, int cellIndex);
 };
 
 }

@@ -31,6 +31,9 @@ public:
     std::string sessionId;  // 一次擦除拖动的会话 id（远端用于关联 Begin/Move/End）
     std::vector<std::string> removedIds;
     std::vector<std::shared_ptr<Element>> addedElements;
+    // 与 addedElements 一一对齐的归属位置（parentId 空 = 页面级）。
+    // 双端同版本构建，无向后兼容负担。
+    std::vector<EraserPlacement> addedPlacements;
 };
 
 } // namespace whiteboard

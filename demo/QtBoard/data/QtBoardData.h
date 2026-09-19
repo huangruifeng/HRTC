@@ -21,11 +21,15 @@
 // - 撤销/重做：每页独立历史栈（保留最近 20 次），撤销/重做后回调全量刷新。
 class QtBoardData {
 public:
-    // 橡皮擦增量：removed = 被擦除元素 id；added = 擦除切割产生的新笔画碎片
+    // 橡皮擦增量：removed = 被擦除元素 id；added = 擦除切割产生的新笔画碎片；
+    // placements 与 added 一一对齐（归属位置：parentId 空 = 页面级追加）
     using ElementsChangedCb = std::function<void(std::vector<std::string> removed,
-                                                 std::vector<std::shared_ptr<whiteboard::Element>> added)>;
-    // 一笔落库：token 用于匹配 UI 侧预览笔画
-    using StrokeCommittedCb = std::function<void(uint64_t token, const std::string& id)>;
+                                                 std::vector<std::shared_ptr<whiteboard::Element>> added,
+                                                 std::vector<whiteboard::EraserPlacement> placements)>;
+    // 一笔落库：token 用于匹配 UI 侧预览笔画；
+    // 起点归属表格单元格时 parentId 非空（否则 parentId 空、cellIndex = -1）
+    using StrokeCommittedCb = std::function<void(uint64_t token, const std::string& id,
+                                                 const std::string& parentId, int cellIndex)>;
     using ClearedCb = std::function<void()>;
     // 页面整体被替换（撤销/重做/远程页面操作），UI 需全量重建
     using PageChangedCb = std::function<void()>;
@@ -72,6 +76,64 @@ public:
     // 元素变换烘焙：用新点集替换指定笔画（id/color/width 不变，重算包围盒）
     void UpdateStroke(const std::string& id, const std::vector<whiteboard::Point>& points);
 
+    // ---------- 新增元素（图形/思维导图/表格）：本地操作 ----------
+    // 当前页追加元素（PushSnapshot + ElementAdd 广播 + 增量回调）
+    void AddElement(std::shared_ptr<whiteboard::Element> element);
+    // 按 id 递归删除元素（页面级 / 表格单元格内任意元素）；删除表格级联删除
+    // 全部子元素（removed 回调含级联 id）；每个顶层 id 广播一次 ElementRemove
+    void RemoveElements(const std::vector<std::string>& ids);
+    // 图形几何静默写回（不触发 onElementsChanged，UI 自行保持同步）+ ElementUpdate 广播
+    void UpdateGraphicGeometry(const std::string& id, const std::vector<whiteboard::Subpath>& subpaths);
+    // 表格几何静默写回（bounds + rotation 度，顺时针正角）+ ElementUpdate 广播
+    void UpdateTableGeometry(const std::string& id, const whiteboard::Rect& bounds, float rotation);
+
+    // ---------- 文字元素：本地操作 ----------
+    // 几何静默写回（锚点 + 字号 + rotation 度，顺时针正角）+ ElementUpdate 广播
+    // （变换烘焙用；UI 自行保持同步）
+    void UpdateTextGeometry(const std::string& id, int x, int y, int fontSize, float rotation);
+    // 文本内容编辑：PushSnapshot → 改 text → 深拷贝快照广播（ElementUpdate）+
+    // 增量回调（removed={id}/added={快照}），UI 与远端走同一重建路径
+    void UpdateTextContent(const std::string& id, const std::string& text);
+
+    // ---------- 小工具元素：本地操作 ----------
+    // 几何静默写回（卡片左上角 + 等比缩放 0.5~3.0）+ ElementUpdate 广播
+    // （变换烘焙用；UI 自行保持同步）
+    void UpdateWidgetGeometry(const std::string& id, int x, int y, float scale);
+    // 计时器时长静默写回（卡片内滚轮设置态点开始时提交；不入撤销栈，防滚轮刷爆
+    // 历史）+ ElementUpdate 广播
+    void UpdateWidgetDuration(const std::string& id, int durationSec);
+    // 骰子参数静默写回（面数 4/6/8/12/20 + 颗数 1~10；卡片设置态点确定时提交）
+    // + ElementUpdate 广播
+    void UpdateWidgetDiceParams(const std::string& id, int sides, int count);
+    // 转盘/点名器候选项写回（文本内容，UTF-8 每行一项；卡片编辑弹窗提交时调用）：
+    // PushSnapshot → 改 options → 深拷贝快照广播 + removed/added 增量回调
+    // （UI 与远端走同一重建路径，可撤销）
+    void UpdateWidgetOptions(const std::string& id, const std::string& options);
+    // 去重模式开关静默写回（抽中自动移出；不入撤销栈）+ ElementUpdate 广播
+    void UpdateWidgetDedup(const std::string& id, bool dedup);
+    // 点名器一次抽取人数静默写回（1 ~ 5；不入撤销栈）+ ElementUpdate 广播
+    void UpdateWidgetPickCount(const std::string& id, int pickCount);
+
+    // ---------- 思维导图（树状结构操作）：本地操作 ----------
+    // 均为：PushSnapshot → 改元素 → 深拷贝快照广播（ElementUpdate）+ 增量回调
+    // （removed={id}/added={快照}），UI 与远端走同一重建路径。
+    // 整体变换烘焙写回（root + scale + rotation 度，顺时针正角）
+    void UpdateMindMapGeometry(const std::string& id, const whiteboard::Point& root,
+                               float scaleX, float scaleY, float rotation);
+    // 展开/收缩指定节点（collapsed 取反）
+    void MindMapToggleNode(const std::string& id, const std::string& nodeId);
+    // 在指定节点下追加一个子节点（自动布局重排；父节点确保展开）
+    void MindMapAddChild(const std::string& id, const std::string& nodeId);
+    // 删除指定节点及其子树（根节点拒绝）
+    void MindMapRemoveNode(const std::string& id, const std::string& nodeId);
+
+    // ---------- 批量快照（撤销粒度合并） ----------
+    // BeginBatch：记录一次快照后抑制批内所有 Update* 各自快照；EndBatch 解除抑制。
+    // 用于一次变换烘焙产生多条 Update*（表格 + 展开的格子笔迹×N）时合并为单个撤销步。
+    // 调用顺序经数据线程 FIFO 投递保证：BeginBatch → Update* → EndBatch。
+    void BeginBatch();
+    void EndBatch();
+
     // ---------- 远程命令应用（经数据线程投递，不产生 OutgoingCmdCb） ----------
     // 远程笔画：Begin/Move 触发 StrokePreviewCb 实时预览；End 落库 + onElementsChanged
     void RemoteStrokeBegin(const std::string& strokeId, int width, uint32_t color,
@@ -84,7 +146,8 @@ public:
     void RemoteEraserMove(const std::string& sessionId, const std::vector<whiteboard::Point>& points);
     void RemoteEraserEnd(const std::string& sessionId,
                          const std::vector<std::string>& removedIds,
-                         const std::vector<std::shared_ptr<whiteboard::Element>>& addedElements);
+                         const std::vector<std::shared_ptr<whiteboard::Element>>& addedElements,
+                         const std::vector<whiteboard::EraserPlacement>& addedPlacements);
     // 远程套索/选择预览透传（不落库，仅触发 ToolPreviewCb）
     void RemoteLassoPreview(const std::string& sessionId,
                             const std::vector<whiteboard::Point>& points);
@@ -92,6 +155,10 @@ public:
                                 const std::vector<whiteboard::Point>& points,
                                 const std::vector<std::string>& selectedIds);
     void RemoteUpdateStroke(const std::string& id, const std::vector<whiteboard::Point>& points);
+    // 远程元素增删改（不产生 OutgoingCmdCb；更新走 removed={id}+added={新元素} 增量模式）
+    void RemoteAddElement(const std::shared_ptr<whiteboard::Element>& element);
+    void RemoteRemoveElements(const std::vector<std::string>& ids);
+    void RemoteUpdateElement(const std::shared_ptr<whiteboard::Element>& element);
     void RemoteClear();
     void RemoteCreatePage(const std::string& pageId);
     void RemoteSelectPage(const std::string& pageId);
@@ -130,9 +197,17 @@ private:
     };
 
     void PushSnapshot();  // 仅数据线程内调用：记录操作前状态到 undo 栈
-    // 收集橡皮增量并清空累积（返回值：过滤后的 removed/added，供 EraserEnd 命令使用）
-    std::pair<std::vector<std::string>, std::vector<std::shared_ptr<whiteboard::Element>>>
-    FlushEraser(bool clearAccum);
+    // 橡皮擦增量（removed/added + 与 added 一一对齐的归属位置）
+    struct EraserDelta {
+        std::vector<std::string> removedIds;
+        std::vector<std::shared_ptr<whiteboard::Element>> addedElements;
+        std::vector<whiteboard::EraserPlacement> addedPlacements;
+    };
+    // 收集橡皮增量并清空累积（返回值供 EraserEnd 命令使用）
+    EraserDelta FlushEraser(bool clearAccum);
+    // 思维导图变更统一收尾（仅数据线程调用）：深拷贝快照 → ElementUpdate 广播
+    // + removed={id}/added={快照} 增量回调（快照脱离活对象，防跨线程读改竞态）
+    void NotifyMindMapChanged(const whiteboard::MindMapElement& mind);
     std::shared_ptr<whiteboard::Page>& CurrentPage();  // 仅数据线程内调用
     // 本地/远程笔画会话 key（本地 "l:<sessionId>"，远程 "r:<strokeId>"）
     static std::string LocalStrokeKey(int sessionId) { return "l:" + std::to_string(sessionId); }
@@ -163,7 +238,9 @@ private:
     uint64_t pendingToken_ = 0;
     std::set<std::string> eraserRemoved_;
     std::vector<std::shared_ptr<whiteboard::Element>> eraserAdded_;
+    std::vector<whiteboard::EraserPlacement> eraserAddedPlacements_;  // 与 eraserAdded_ 对齐
     std::map<std::string, PageHistory> histories_;  // pageId -> 历史栈
+    bool batchSuppress_ = false;  // 批内抑制 PushSnapshot（仅数据线程访问）
 
     static constexpr size_t kHistoryLimit = 20;
 };

@@ -28,9 +28,14 @@
 #include "EraserPanel.h"
 #include "JoinRoomDialog.h"
 #include "MorePanel.h"
+#include "OtherToolsPanel.h"
 #include "PenSettingPanel.h"
 #include "SettingsPanel.h"
+#include "ShapePickerPanel.h"
 #include "SlideManagerPanel.h"
+#include "TableSetupPanel.h"
+#include "TextSetupPanel.h"
+#include "WidgetSetupPanel.h"
 
 namespace {
 
@@ -166,6 +171,24 @@ bool loadBoardFromFile(const QString& path, std::vector<whiteboard::Page>* pages
     return true;
 }
 
+// 工具 → "其他"面板条目下标（图形/导图/表格/文字/小工具；非 5 类工具返回 -1）
+int otherToolIndex(BoardView::Tool tool) {
+    switch (tool) {
+        case BoardView::Tool::Shape:
+            return OtherToolsPanel::ItemShape;
+        case BoardView::Tool::MindMap:
+            return OtherToolsPanel::ItemMindMap;
+        case BoardView::Tool::Table:
+            return OtherToolsPanel::ItemTable;
+        case BoardView::Tool::Text:
+            return OtherToolsPanel::ItemText;
+        case BoardView::Tool::Widget:
+            return OtherToolsPanel::ItemWidget;
+        default:
+            return -1;
+    }
+}
+
 }  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
@@ -181,6 +204,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     pagePanel_ = new SlideManagerPanel(this);
     settingsPanel_ = new SettingsPanel(this);
     morePanel_ = new MorePanel(this);
+    shapePanel_ = new ShapePickerPanel(this);
+    tablePanel_ = new TableSetupPanel(this);
+    textPanel_ = new TextSetupPanel(this);
+    widgetPanel_ = new WidgetSetupPanel(this);
+    otherPanel_ = new OtherToolsPanel(this);
 
     // 中央区域：画布手动几何（黑板模式 16:9 居中，窗口模式铺满）+ 工具栏悬浮底部居中（距底 15px）
     central_ = new QWidget(this);
@@ -199,6 +227,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(toolBar_, &BoardToolBar::toolSelected, this, &MainWindow::onToolSelected);
     connect(view_, &BoardView::toolChanged, this, [this](BoardView::Tool tool) {
         toolBar_->setCurrentTool(tool);
+        otherPanel_->setCurrentIndex(otherToolIndex(tool));  // 当前工具映射到"其他"面板条目
+        updateOtherButtonState();
     });
     connect(toolBar_, &BoardToolBar::undoRequested, view_, &BoardView::undo);
     connect(toolBar_, &BoardToolBar::redoRequested, view_, &BoardView::redo);
@@ -251,6 +281,54 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             toolBar_->moreButtonGlobalRect().contains(QCursor::pos()))
             moreButtonClosePending_ = true;
     });
+
+    // ---------- "其他"工具面板（图形 / 导图 / 表格 / 文字 / 小工具汇总入口） ----------
+    connect(toolBar_, &BoardToolBar::otherRequested, this, &MainWindow::onOtherRequested);
+    connect(otherPanel_, &OtherToolsPanel::closed, this, [this]() {
+        updateOtherButtonState();
+        // Popup 因点击"其他"按钮而在按下阶段自动关闭：置标志，
+        // 防止同一次点击的释放阶段（clicked）重开面板
+        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
+            toolBar_->otherButtonGlobalRect().contains(QCursor::pos()))
+            otherButtonClosePending_ = true;
+    });
+    // 条目链路：先收起"其他"面板，再延迟切工具/弹参数面板（避免 Popup 更替冲突，
+    // 同"更多→设置"先例；图形/表格/文字/小工具 附带各自参数面板）
+    connect(otherPanel_, &OtherToolsPanel::shapeRequested, this, [this]() {
+        otherPanel_->hide();
+        QTimer::singleShot(0, this, [this]() {
+            view_->setTool(BoardView::Tool::Shape);
+            showPanelAbove(shapePanel_, BoardView::Tool::Shape);
+        });
+    });
+    connect(otherPanel_, &OtherToolsPanel::mindMapRequested, this, [this]() {
+        otherPanel_->hide();
+        QTimer::singleShot(0, this, [this]() {
+            view_->setTool(BoardView::Tool::MindMap);
+        });
+    });
+    connect(otherPanel_, &OtherToolsPanel::tableRequested, this, [this]() {
+        otherPanel_->hide();
+        QTimer::singleShot(0, this, [this]() {
+            view_->setTool(BoardView::Tool::Table);
+            showPanelAbove(tablePanel_, BoardView::Tool::Table);
+        });
+    });
+    connect(otherPanel_, &OtherToolsPanel::textRequested, this, [this]() {
+        otherPanel_->hide();
+        QTimer::singleShot(0, this, [this]() {
+            view_->setTool(BoardView::Tool::Text);
+            showPanelAbove(textPanel_, BoardView::Tool::Text);
+        });
+    });
+    connect(otherPanel_, &OtherToolsPanel::widgetRequested, this, [this]() {
+        otherPanel_->hide();
+        QTimer::singleShot(0, this, [this]() {
+            widgetPanel_->setCurrent(widgetKind_);  // 恢复上次类型选择态
+            view_->setTool(BoardView::Tool::Widget);
+            showPanelAbove(widgetPanel_, BoardView::Tool::Widget);
+        });
+    });
     // ---------- 设置面板（入口在"更多"面板内） ----------
     connect(settingsPanel_, &SettingsPanel::backgroundSelected, this,
             &MainWindow::onBackgroundSelected);
@@ -274,13 +352,72 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             eraserButtonClosePending_ = true;
     });
 
+    // ---------- 图形 / 表格面板（工具栏弹出形状与行列选择） ----------
+    connect(shapePanel_, &ShapePickerPanel::shapeSelected, this, [this](int kind) {
+        shapePanel_->setCurrentKind(kind);
+        view_->setShapeKind(kind);
+        view_->setTool(BoardView::Tool::Shape);  // 选完形状切回图形工具继续绘制
+    });
+    connect(shapePanel_, &ShapePickerPanel::closed, this, [this]() {
+        toolBar_->setToolPanelExtended(BoardView::Tool::Shape, false);
+        // 若因点击图形工具按钮在按下阶段自动关闭：置标志，防止释放阶段重开
+        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
+            toolBar_->toolButtonGlobalRect(BoardView::Tool::Shape).contains(QCursor::pos()))
+            shapeButtonClosePending_ = true;
+    });
+    connect(tablePanel_, &TableSetupPanel::tableSizeChanged, this, [this](int rows, int cols) {
+        tablePanel_->setCurrentSize(rows, cols);
+        view_->setTableSize(rows, cols);
+        view_->setTool(BoardView::Tool::Table);  // 选完行列切回表格工具继续绘制
+    });
+    connect(tablePanel_, &TableSetupPanel::closed, this, [this]() {
+        toolBar_->setToolPanelExtended(BoardView::Tool::Table, false);
+        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
+            toolBar_->toolButtonGlobalRect(BoardView::Tool::Table).contains(QCursor::pos()))
+            tableButtonClosePending_ = true;
+    });
+    connect(textPanel_, &TextSetupPanel::fontSizeChanged, this, [this](int size) {
+        textPanel_->setCurrentSize(size);
+        view_->setTextFontSize(size);
+        view_->setTool(BoardView::Tool::Text);  // 选完字号切回文字工具继续输入
+    });
+    connect(textPanel_, &TextSetupPanel::colorChanged, this, [this](uint32_t color) {
+        textColor_ = color;
+        view_->setTextColor(color);  // 新建文字颜色即时生效（面板保持展开，同笔面板）
+    });
+    connect(textPanel_, &TextSetupPanel::closed, this, [this]() {
+        toolBar_->setToolPanelExtended(BoardView::Tool::Text, false);
+        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
+            toolBar_->toolButtonGlobalRect(BoardView::Tool::Text).contains(QCursor::pos()))
+            textButtonClosePending_ = true;
+    });
+
+    // ---------- 小工具面板（秒表/计时器/计算器/算盘/骰子/大转盘/点名器类型选择；参数在卡片内设置） ----------
+    connect(widgetPanel_, &WidgetSetupPanel::widgetChosen, this, [this](int kind) {
+        widgetKind_ = kind;
+        widgetPanel_->setCurrent(kind);
+        view_->setWidgetKind(kind);
+        view_->setTool(BoardView::Tool::Widget);  // 选完类型切回小工具继续放置
+    });
+    connect(widgetPanel_, &WidgetSetupPanel::closed, this, [this]() {
+        toolBar_->setToolPanelExtended(BoardView::Tool::Widget, false);
+        // 若因点击小工具按钮在按下阶段自动关闭：置标志，防止释放阶段重开
+        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
+            toolBar_->toolButtonGlobalRect(BoardView::Tool::Widget).contains(QCursor::pos()))
+            widgetButtonClosePending_ = true;
+    });
+
     // 初始状态：书写工具 + 笔宽 3 + 白色 + 100%
     view_->setPenColor(penColor_);
     view_->setPenWidth(penWidth_);
+    view_->setTextColor(textColor_);  // 文字工具颜色（默认白色，独立于笔色）
     view_->setTool(BoardView::Tool::Pen);
     toolBar_->setCurrentTool(BoardView::Tool::Pen);
     toolBar_->setZoomPercent(100.0);
     penPanel_->setCurrent(PenSettingPanel::PenKind::Normal, penColor_, penWidth_);
+    textPanel_->setCurrentColor(textColor_);
+    view_->setWidgetKind(widgetKind_);  // 小工具默认秒表（类型 0~6，参数在卡片内设置）
+    widgetPanel_->setCurrent(widgetKind_);
 
     // 默认黑板背景：内置网格图（参考 MaxWhiteboard Image.Background.Default）
     backgroundKey_ = QStringLiteral(":/images/board_bg_default.png");
@@ -304,6 +441,22 @@ void MainWindow::onToolSelected(BoardView::Tool tool) {
         eraserButtonClosePending_ = false;
         return;
     }
+    if (tool == BoardView::Tool::Shape && shapeButtonClosePending_) {
+        shapeButtonClosePending_ = false;
+        return;
+    }
+    if (tool == BoardView::Tool::Table && tableButtonClosePending_) {
+        tableButtonClosePending_ = false;
+        return;
+    }
+    if (tool == BoardView::Tool::Text && textButtonClosePending_) {
+        textButtonClosePending_ = false;
+        return;
+    }
+    if (tool == BoardView::Tool::Widget && widgetButtonClosePending_) {
+        widgetButtonClosePending_ = false;
+        return;
+    }
 
     // 参照 MaxWhiteboard：非该模式时点击仅切换到该模式（不弹设置面板）；
     // 已在该模式时再次点击工具按钮才弹出设置面板（再点收起）
@@ -311,22 +464,74 @@ void MainWindow::onToolSelected(BoardView::Tool tool) {
 
     view_->setTool(tool);  // toolChanged 回传同步工具栏选中态
 
-    // 书写 / 擦除：切换对应设置面板；其它工具收起全部面板
+    // 书写 / 擦除 / 图形 / 表格 / 文字 / 小工具：切换对应设置面板；其它工具收起全部面板
     if (tool == BoardView::Tool::Pen) {
         eraserPanel_->hide();
+        shapePanel_->hide();
+        tablePanel_->hide();
+        textPanel_->hide();
+        widgetPanel_->hide();
         if (alreadyActive)
             showPanelAbove(penPanel_, tool);
         else
             penPanel_->hide();
     } else if (tool == BoardView::Tool::Eraser) {
         penPanel_->hide();
+        shapePanel_->hide();
+        tablePanel_->hide();
+        textPanel_->hide();
+        widgetPanel_->hide();
         if (alreadyActive)
             showPanelAbove(eraserPanel_, tool);
         else
             eraserPanel_->hide();
+    } else if (tool == BoardView::Tool::Shape) {
+        penPanel_->hide();
+        eraserPanel_->hide();
+        tablePanel_->hide();
+        textPanel_->hide();
+        widgetPanel_->hide();
+        if (alreadyActive)
+            showPanelAbove(shapePanel_, tool);
+        else
+            shapePanel_->hide();
+    } else if (tool == BoardView::Tool::Table) {
+        penPanel_->hide();
+        eraserPanel_->hide();
+        shapePanel_->hide();
+        textPanel_->hide();
+        widgetPanel_->hide();
+        if (alreadyActive)
+            showPanelAbove(tablePanel_, tool);
+        else
+            tablePanel_->hide();
+    } else if (tool == BoardView::Tool::Text) {
+        penPanel_->hide();
+        eraserPanel_->hide();
+        shapePanel_->hide();
+        tablePanel_->hide();
+        widgetPanel_->hide();
+        if (alreadyActive)
+            showPanelAbove(textPanel_, tool);
+        else
+            textPanel_->hide();
+    } else if (tool == BoardView::Tool::Widget) {
+        penPanel_->hide();
+        eraserPanel_->hide();
+        shapePanel_->hide();
+        tablePanel_->hide();
+        textPanel_->hide();
+        // 单段式：点击小工具按钮直接展开类型面板（不再要求先激活工具）；面板已
+        // 展开时再次点击的收起由 pending 标志与 showPanelAbove 处理
+        widgetPanel_->setCurrent(widgetKind_);  // 恢复上次选择态
+        showPanelAbove(widgetPanel_, tool);
     } else {
         penPanel_->hide();
         eraserPanel_->hide();
+        shapePanel_->hide();
+        tablePanel_->hide();
+        textPanel_->hide();
+        widgetPanel_->hide();
     }
 }
 
@@ -337,7 +542,9 @@ void MainWindow::showPanelAbove(QWidget* panel, BoardView::Tool tool) {
         return;
     }
 
-    const QRect buttonRect = toolBar_->toolButtonGlobalRect(tool);
+    QRect buttonRect = toolBar_->toolButtonGlobalRect(tool);
+    if (buttonRect.isNull())
+        buttonRect = toolBar_->otherButtonGlobalRect();  // 5 类工具已移入"其他"面板：子面板锚定"其他"按钮
     if (buttonRect.isNull())
         return;
 
@@ -518,6 +725,50 @@ void MainWindow::positionMorePanel() {
         pos.setY(maxY > minY ? qBound(minY, pos.y(), maxY) : minY);
     }
     morePanel_->move(pos);
+}
+
+// "其他"按钮：弹出/收起其他工具面板
+void MainWindow::onOtherRequested() {
+    if (otherPanel_->isVisible()) {
+        otherPanel_->hide();  // hideEvent 中复位按钮激活态
+        return;
+    }
+    // 同一次点击的按下阶段 Popup 已自动关闭面板（closed 时置标志）→ 视为收起，不重开
+    if (otherButtonClosePending_) {
+        otherButtonClosePending_ = false;
+        return;
+    }
+    positionOtherPanel();
+    otherPanel_->show();
+    otherPanel_->setCurrentIndex(otherToolIndex(view_->currentTool()));  // 恢复当前工具选中态
+    toolBar_->setOtherButtonActive(true);
+}
+
+// 面板定位：水平居中于"其他"按钮，位于其上方 8px（防出屏）
+void MainWindow::positionOtherPanel() {
+    const QRect buttonRect = toolBar_->otherButtonGlobalRect();
+    QPoint pos(buttonRect.center().x() - otherPanel_->width() / 2,
+               buttonRect.top() - otherPanel_->height() - 8);
+
+    QScreen* screen = QGuiApplication::screenAt(buttonRect.center());
+    if (!screen)
+        screen = QGuiApplication::primaryScreen();
+    if (screen) {
+        const QRect available = screen->availableGeometry();
+        const int minX = available.left() + 8;
+        const int maxX = available.right() - otherPanel_->width() - 8;
+        pos.setX(maxX > minX ? qBound(minX, pos.x(), maxX) : minX);
+        const int minY = available.top() + 8;
+        const int maxY = available.bottom() - otherPanel_->height() - 8;
+        pos.setY(maxY > minY ? qBound(minY, pos.y(), maxY) : minY);
+    }
+    otherPanel_->move(pos);
+}
+
+// "其他"按钮激活态：面板展开中 或 当前工具属于 5 类（图形/导图/表格/文字/小工具）
+void MainWindow::updateOtherButtonState() {
+    toolBar_->setOtherButtonActive(otherPanel_->isVisible() ||
+                                   otherToolIndex(view_->currentTool()) >= 0);
 }
 
 // 保存白板：选择路径 → 序列化全部页面（数据层深拷贝快照）写入文件

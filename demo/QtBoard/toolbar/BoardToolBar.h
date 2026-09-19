@@ -50,6 +50,7 @@ public:
     void setAddPageEnabled(bool enabled);    // 页数达上限时置灰"添加页"
     void setPageButtonActive(bool active);   // 页数缩略图面板展开中点亮页码按钮
     void setMoreButtonActive(bool active);   // 更多面板展开中点亮更多按钮
+    void setOtherButtonActive(bool active);  // "其他"面板展开中/5类工具激活中点亮"其他"按钮
 
     // 指定工具按钮的全局矩形（弹出面板定位用；按钮不存在时返回空矩形）
     QRect toolButtonGlobalRect(BoardView::Tool tool) const;
@@ -57,6 +58,8 @@ public:
     QRect pageButtonGlobalRect() const;
     // 更多按钮的全局矩形（更多/设置面板定位用）
     QRect moreButtonGlobalRect() const;
+    // "其他"按钮的全局矩形（图形/表格/文字/小工具子面板及"其他"面板定位用）
+    QRect otherButtonGlobalRect() const;
 
 protected:
     void paintEvent(QPaintEvent* event) override;  // 自绘圆角背景（圆角外透明，露出画布）
@@ -73,6 +76,7 @@ signals:
     void nextPageRequested();
     void pagePanelRequested();  // 页码按钮：弹出页数缩略图面板
     void moreRequested();       // 更多按钮：弹出/收起更多面板（互动/保存/打开/设置/退出）
+    void otherRequested();      // "其他"按钮：弹出/收起其他工具面板（图形/导图/表格/文字/小工具）
 
 private:
     BoardToolButton* createButton(const QString& text, const QPixmap& normal,
@@ -87,4 +91,5 @@ private:
     BoardToolButton* prevButton_ = nullptr;
     BoardToolButton* nextButton_ = nullptr;
     BoardToolButton* moreButton_ = nullptr;
+    BoardToolButton* otherButton_ = nullptr;  // 左侧工具组"其他"入口（非 checkable，仿 moreButton_）
 };

@@ -19,7 +19,10 @@ void Stroke::Reset()
     color = 0;
     points.clear();
     rawPoints.clear();
-    bounding = BoundaryRect(Rect(0, 0, 0, 0));
+    // 空包围盒（含毒值），首个点 Append/Update 后收敛为真实范围；
+    // 不可初始化为 Rect(0,0,0,0)，否则每个笔画会包含幽灵原点(0,0)，
+    // 导致缩略图计算 least 矩形时跨度被撑爆、内容不可见。
+    bounding = BoundaryRect();
     minDistance = 20;
 }
 

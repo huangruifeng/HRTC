@@ -16,6 +16,11 @@ class EraserPanel;
 class SlideManagerPanel;
 class SettingsPanel;
 class MorePanel;
+class ShapePickerPanel;
+class TableSetupPanel;
+class TextSetupPanel;
+class WidgetSetupPanel;
+class OtherToolsPanel;
 
 class QEvent;
 class QResizeEvent;
@@ -53,6 +58,9 @@ private:
     void positionSettingsPanel();                // 面板定位到更多按钮上方
     void onMoreRequested();                      // 更多按钮：弹出/收起更多面板
     void positionMorePanel();                    // 更多面板定位到更多按钮上方
+    void onOtherRequested();                     // "其他"按钮：弹出/收起其他工具面板
+    void positionOtherPanel();                   // "其他"面板定位到"其他"按钮上方
+    void updateOtherButtonState();               // 刷新"其他"按钮激活态（面板可见或当前工具∈5类）
     void onSaveBoard();                          // 保存白板到文件（弹出路径选择）
     void onOpenBoard();                          // 从文件打开白板（弹出路径选择）
     void onBackgroundSelected(const QString& key, const QPixmap& pixmap);  // 应用黑板背景
@@ -69,6 +77,11 @@ private:
     SlideManagerPanel* pagePanel_ = nullptr;
     SettingsPanel* settingsPanel_ = nullptr;
     MorePanel* morePanel_ = nullptr;
+    ShapePickerPanel* shapePanel_ = nullptr;
+    TableSetupPanel* tablePanel_ = nullptr;
+    TextSetupPanel* textPanel_ = nullptr;
+    WidgetSetupPanel* widgetPanel_ = nullptr;
+    OtherToolsPanel* otherPanel_ = nullptr;
     std::unique_ptr<WhiteboardSession> session_;
 
     QWidget* central_ = nullptr;      // 中央区域（画布 + 悬浮工具栏）
@@ -76,6 +89,8 @@ private:
     QByteArray windowedGeometry_;     // 窗口模式几何（切全屏前保存，切回时恢复）
     uint32_t penColor_ = 0x00FFFFFF;  // 默认白色（COLORREF 语义 0x00BBGGRR）
     int penWidth_ = 3;                // 默认细档（3 / 6 / 12）
+    uint32_t textColor_ = 0x00FFFFFF; // 文字工具颜色（COLORREF 语义 0x00BBGGRR，默认白色）
+    int widgetKind_ = 0;              // 小工具类型（0 秒表 / 1 计时器 / 2 计算器 / 3 算盘 / 4 骰子 / 5 大转盘 / 6 点名器，面板选择）
     QString backgroundKey_;           // 当前背景标识（资源路径或图片文件绝对路径）
     QPixmap backgroundPixmap_;        // 当前背景原图
     // 更多面板因点击更多按钮而关闭（Popup 在按下阶段自动关闭）：
@@ -83,9 +98,15 @@ private:
     bool moreButtonClosePending_ = false;
     // 页数面板因点击页码按钮而关闭：同上
     bool pageButtonClosePending_ = false;
-    // 笔 / 擦除面板因点击对应工具按钮在按下阶段自动关闭：同上（释放阶段不重开）
+    // "其他"面板因点击"其他"按钮而关闭：同上（释放阶段不重开）
+    bool otherButtonClosePending_ = false;
+    // 笔 / 擦除 / 图形 / 表格 / 文字 / 小工具面板因点击对应工具按钮在按下阶段自动关闭：同上（释放阶段不重开）
     bool penButtonClosePending_ = false;
     bool eraserButtonClosePending_ = false;
+    bool shapeButtonClosePending_ = false;
+    bool tableButtonClosePending_ = false;
+    bool textButtonClosePending_ = false;
+    bool widgetButtonClosePending_ = false;
     bool aspectLockGuard_ = false;    // 16:9 锁定 resize 递归保护
     QString windowTitleBase_;
 };

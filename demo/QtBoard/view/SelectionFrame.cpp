@@ -8,6 +8,7 @@
 
 namespace {
 const QColor kFrameColor(74, 144, 217);
+const QColor kDeleteColor(220, 53, 69);
 }  // namespace
 
 SelectionFrame::SelectionFrame(const QList<QGraphicsPathItem*>& targets)
@@ -78,6 +79,10 @@ void SelectionFrame::layoutHandles() {
     const QPointF unit = len > 1e-6 ? dir / len : QPointF(0, -1);
     handlePos_[Rotate] = topMid + unit * kRotateOffset;
 
+    // 删除按钮：右上角斜向外移（避开 TR 缩放手柄）
+    handlePos_[Delete] = QPointF(rect_.right() + kDeleteOffset,
+                                 rect_.top() - kDeleteOffset);
+
     for (int i = TL; i <= B; ++i) {
         handleRect_[i] = QRectF(handlePos_[i].x() - hs / 2,
                                 handlePos_[i].y() - hs / 2, hs, hs);
@@ -87,6 +92,9 @@ void SelectionFrame::layoutHandles() {
     const qreal r = kRotateRadius + 4;
     handleRect_[Rotate] = QRectF(handlePos_[Rotate].x() - r,
                                  handlePos_[Rotate].y() - r, r * 2, r * 2);
+    const qreal dr = kDeleteRadius + 4;
+    handleRect_[Delete] = QRectF(handlePos_[Delete].x() - dr,
+                                 handlePos_[Delete].y() - dr, dr * 2, dr * 2);
 }
 
 void SelectionFrame::sync() {
@@ -96,7 +104,7 @@ void SelectionFrame::sync() {
 }
 
 SelectionFrame::Handle SelectionFrame::handleAt(const QPointF& scenePos) const {
-    for (int i = TL; i <= Rotate; ++i) {
+    for (int i = TL; i <= Delete; ++i) {
         if (handleRect_[i].contains(scenePos))
             return static_cast<Handle>(i);
     }
@@ -105,7 +113,7 @@ SelectionFrame::Handle SelectionFrame::handleAt(const QPointF& scenePos) const {
 
 QRectF SelectionFrame::boundingRect() const {
     return rect_.adjusted(-kHandleSize - 4, -kRotateOffset - 16,
-                          kHandleSize + 4, kHandleSize + 4);
+                          kDeleteOffset + kDeleteRadius + 4, kHandleSize + 4);
 }
 
 void SelectionFrame::paint(QPainter* painter,
@@ -128,4 +136,14 @@ void SelectionFrame::paint(QPainter* painter,
     painter->drawLine(topMid, handlePos_[Rotate]);
     painter->setBrush(kFrameColor);
     painter->drawEllipse(handlePos_[Rotate], kRotateRadius, kRotateRadius);
+
+    // 删除按钮：红底圆 + 白色十字符号
+    const QPointF dp = handlePos_[Delete];
+    painter->setPen(QPen(kDeleteColor.darker(120), 1));
+    painter->setBrush(kDeleteColor);
+    painter->drawEllipse(dp, kDeleteRadius, kDeleteRadius);
+    painter->setPen(QPen(Qt::white, 2));
+    const qreal cr = kDeleteRadius * 0.45;
+    painter->drawLine(QPointF(dp.x() - cr, dp.y()), QPointF(dp.x() + cr, dp.y()));
+    painter->drawLine(QPointF(dp.x(), dp.y() - cr), QPointF(dp.x(), dp.y() + cr));
 }

@@ -1,8 +1,35 @@
 #include "Whiteboard/page/page.h"
+#include "Whiteboard/element/table.h"
 #include "Whiteboard/geometry/line_segment.h"
 #include <algorithm>
 
 namespace whiteboard {
+
+namespace {
+
+// 单列表内按 id 更新笔画点集并重算包围盒；找到目标返回 true。
+bool UpdateStrokeInList(std::list<std::shared_ptr<Element>>& list,
+                        const std::string& id, const std::vector<Point>& points)
+{
+    for (auto& e : list)
+    {
+        if (e->id != id)
+            continue;
+        auto* stroke = dynamic_cast<Stroke*>(e.get());
+        if (!stroke)
+            return false;
+        stroke->points = points;
+        stroke->rawPoints = points;
+        // 从空包围盒重新收敛（不能用 Rect(0,0,0,0)，否则含幽灵原点导致缩略图异常）
+        stroke->bounding = BoundaryRect();
+        for (const auto& p : points)
+            stroke->bounding.Update(p.x, p.y);
+        return true;
+    }
+    return false;
+}
+
+}  // namespace
 
 Page::Page()
 {
@@ -31,19 +58,19 @@ void Page::Clear()
 
 bool Page::UpdateStroke(const std::string& id, const std::vector<Point>& points)
 {
+    if (UpdateStrokeInList(elements, id, points))
+        return true;
+    // 表格单元格内的笔迹（坐标为页面绝对坐标，与页面级同一套更新逻辑）
     for (auto& e : elements)
     {
-        if (e->id != id)
-            continue;
-        auto* stroke = dynamic_cast<Stroke*>(e.get());
-        if (!stroke)
-            return false;
-        stroke->points = points;
-        stroke->rawPoints = points;
-        stroke->bounding = BoundaryRect(Rect(0, 0, 0, 0));
-        for (const auto& p : points)
-            stroke->bounding.Update(p.x, p.y);
-        return true;
+        if (auto* table = dynamic_cast<TableElement*>(e.get()))
+        {
+            for (auto& cell : table->cells)
+            {
+                if (UpdateStrokeInList(cell, id, points))
+                    return true;
+            }
+        }
     }
     return false;
 }
@@ -58,11 +85,9 @@ std::shared_ptr<Page> Page::Clone() const
     page->insertInstance = insertInstance;
     for (const auto& e : elements)
     {
-        // 元素逐个克隆：Stroke 深拷贝点集；未知类型保持共享引用（防御）
-        if (auto* stroke = dynamic_cast<const Stroke*>(e.get()))
-            page->elements.push_back(std::make_shared<Stroke>(*stroke));
-        else
-            page->elements.push_back(e);
+        // 元素逐个克隆：按类型深拷贝（Table 递归单元格子元素）；未知类型保持共享引用（防御）
+        auto copy = e ? CloneElement(*e) : nullptr;
+        page->elements.push_back(copy ? copy : e);
     }
     return page;
 }
@@ -98,6 +123,7 @@ EraserResult Page::Eraser(const Rect& rc, int sid)
                 result.removedIds.push_back(id);
         }
         result.addedElements.insert(result.addedElements.end(), r.addedElements.begin(), r.addedElements.end());
+        result.addedPlacements.insert(result.addedPlacements.end(), r.addedPlacements.begin(), r.addedPlacements.end());
     }
 
     if (enableEraserInsert) {
@@ -111,8 +137,33 @@ EraserResult Page::Eraser(const Rect& rc, int sid)
 EraserResult Page::Eraser(const Rect& rc)
 {
     EraserResult result;
+    EraseInList(elements, rc, result, "", -1);
 
-    for (auto it = elements.begin(); it != elements.end();)
+    // 表格递归：仅擦除各单元格内的 Stroke（碎片原地替换、归属不变），
+    // 网格本身与其他类型元素天然跳过。先收集表指针再处理，避免迭代器失效。
+    std::vector<TableElement*> tables;
+    for (auto& e : elements)
+    {
+        if (auto* table = dynamic_cast<TableElement*>(e.get()))
+            tables.push_back(table);
+    }
+    for (auto* table : tables)
+    {
+        for (size_t ci = 0; ci < table->cells.size(); ++ci)
+            EraseInList(table->cells[ci], rc, result, table->id, static_cast<int>(ci));
+    }
+
+    return result;
+}
+
+void Page::EraseInList(std::list<std::shared_ptr<Element>>& list, const Rect& rc,
+                       EraserResult& result, const std::string& parentId, int cellIndex)
+{
+    EraserPlacement placement;
+    placement.parentId = parentId;
+    placement.cellIndex = cellIndex;
+
+    for (auto it = list.begin(); it != list.end();)
     {
         auto* stroke = dynamic_cast<Stroke*>(it->get());
         if (!stroke)
@@ -150,7 +201,7 @@ EraserResult Page::Eraser(const Rect& rc)
         if (partPoints.empty())
         {
             result.removedIds.push_back(stroke->id);
-            it = elements.erase(it);
+            it = list.erase(it);
         }
         else if (1 == partPoints.size() && !firstContain)
         {
@@ -240,10 +291,13 @@ EraserResult Page::Eraser(const Rect& rc)
 
                 result.removedIds.push_back(stroke->id);
                 for (auto& np : newPaths)
+                {
                     result.addedElements.push_back(np);
+                    result.addedPlacements.push_back(placement);
+                }
 
-                it = elements.erase(it);
-                it = elements.insert(it, newPaths.begin(), newPaths.end());
+                it = list.erase(it);
+                it = list.insert(it, newPaths.begin(), newPaths.end());
                 size_t i = 0;
                 while (i < newPaths.size())
                 {
@@ -257,8 +311,6 @@ EraserResult Page::Eraser(const Rect& rc)
             }
         }
     }
-
-    return result;
 }
 
 Point Page::PointOfIntersection(const std::vector<Point>::iterator& it, const Rect& orc)
