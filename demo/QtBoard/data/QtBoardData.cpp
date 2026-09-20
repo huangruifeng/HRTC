@@ -21,6 +21,15 @@ std::string GeneratePageId() {
     return std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(d).count());
 }
 
+// 元素新 id：时间戳 + 递增序号（复制页时循环连续生成，纯时间戳可能同值冲突）
+std::string GenerateElementId() {
+    static std::atomic<uint64_t> seq{ 1 };
+    std::chrono::system_clock::duration d =
+        std::chrono::system_clock::now().time_since_epoch();
+    return std::to_string(std::chrono::duration_cast<std::chrono::nanoseconds>(d).count()) +
+           "-" + std::to_string(seq++);
+}
+
 // 橡皮矩形 -> 4 点（左上、右上、右下、左下，供网络传输）
 std::vector<whiteboard::Point> RectToPoints(const whiteboard::Rect& rc) {
     return { rc.GetTopLeft(), rc.GetTopRight(), rc.GetBottomRight(), rc.GetBottomLeft() };
@@ -1127,6 +1136,57 @@ bool QtBoardData::DeletePage(const std::string& pageId) {
             if (onOutgoingCmd_)
                 onOutgoingCmd_(std::move(cmd));
             ok = true;
+            return;
+        }
+    });
+    return ok;
+}
+
+// 复制页：源页 Clone 深拷贝（元素递归克隆）→ 全部 id 重新生成（含表格格内子元素）
+// → 插入源页之后并选中新页。命令序列：PageCreate(源页→新页) + ElementAdd×N
+//（快照脱离活对象）+ PageSelect(新页)；远端按序应用即可重建（先切新页再追加元素）
+bool QtBoardData::CopyPage(const std::string& pageId) {
+    bool ok = false;
+    thread_->Invoke([this, pageId, &ok]() {
+        for (size_t i = 0; i < pages_.size(); ++i) {
+            if (pages_[i]->pageId != pageId)
+                continue;
+            auto copy = pages_[i]->Clone();
+            copy->pageId = GeneratePageId();
+            for (auto& e : copy->elements) {
+                if (!e)
+                    continue;
+                e->id = GenerateElementId();
+                if (auto* table = dynamic_cast<whiteboard::TableElement*>(e.get())) {
+                    for (auto& cell : table->cells)
+                        for (auto& child : cell)
+                            if (child)
+                                child->id = GenerateElementId();
+                }
+            }
+            pages_.insert(pages_.begin() + i + 1, copy);
+            currentPage_ = i + 1;
+            ResetTransientState();
+            ok = true;
+
+            auto create = std::make_shared<whiteboard::PageCreate>();
+            create->pageId = pages_[i]->pageId;  // 源页（远端以此为基准插入其后）
+            create->newPageId = copy->pageId;
+            if (onOutgoingCmd_)
+                onOutgoingCmd_(std::move(create));
+            for (const auto& e : copy->elements) {
+                if (!e)
+                    continue;
+                auto cmd = std::make_shared<whiteboard::ElementAdd>();
+                cmd->pageId = copy->pageId;
+                cmd->element = whiteboard::CloneElement(*e);
+                if (onOutgoingCmd_)
+                    onOutgoingCmd_(std::move(cmd));
+            }
+            auto select = std::make_shared<whiteboard::PageSelect>();
+            select->pageId = copy->pageId;
+            if (onOutgoingCmd_)
+                onOutgoingCmd_(std::move(select));
             return;
         }
     });

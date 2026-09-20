@@ -185,6 +185,7 @@ public:
     std::string CreatePage();                        // 新建空白页并切换为当前页
     void SelectPage(const std::string& pageId);      // 切换当前页（丢弃未完成笔画/橡皮增量）
     bool DeletePage(const std::string& pageId);      // 至少保留一页，成功后自动调整当前页
+    bool CopyPage(const std::string& pageId);        // 复制页（元素深拷贝+新 id，插入源页后并选中）
 
     // ---------- 本地操作产生的工具预览命令（套索/选择，供远端 UI 实时展示） ----------
     void SendToolPreview(uint32_t tool, const std::string& sessionId,

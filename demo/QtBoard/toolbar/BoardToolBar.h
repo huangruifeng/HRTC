@@ -36,7 +36,8 @@ private:
 };
 
 // 底部居中悬浮工具栏（参考 MaxWhiteboard DisplayToolBar）：
-// 左侧工具组（互斥选中）/ 中部功能组 / 右侧页面组，组间 12px 分隔
+// 左侧工具组（互斥选中）/ 中部功能组（撤销重做缩放）/ 右侧"更多"入口，组间 12px 分隔；
+// 页面管理（翻页/页码/添加页）已拆出至左侧 PageRail 页面栏。
 class BoardToolBar : public QWidget {
     Q_OBJECT
 public:
@@ -45,17 +46,11 @@ public:
     void setCurrentTool(BoardView::Tool tool);
     void setToolPanelExtended(BoardView::Tool tool, bool extended);  // 笔/擦除设置面板展开态（按钮换展开态图）
     void setZoomPercent(qreal percent);      // 更新"100%"按钮文字（如 "150%"）
-    void setPageInfo(int index, int total);  // 1-based，更新页码按钮 "i/N"
-    void setPrevNextEnabled(bool prev, bool next);
-    void setAddPageEnabled(bool enabled);    // 页数达上限时置灰"添加页"
-    void setPageButtonActive(bool active);   // 页数缩略图面板展开中点亮页码按钮
     void setMoreButtonActive(bool active);   // 更多面板展开中点亮更多按钮
-    void setOtherButtonActive(bool active);  // "其他"面板展开中/5类工具激活中点亮"其他"按钮
+    void setOtherButtonActive(bool active);   // "其他"面板展开中/5类工具激活中点亮"其他"按钮
 
     // 指定工具按钮的全局矩形（弹出面板定位用；按钮不存在时返回空矩形）
     QRect toolButtonGlobalRect(BoardView::Tool tool) const;
-    // 页码按钮的全局矩形（页数缩略图面板定位用）
-    QRect pageButtonGlobalRect() const;
     // 更多按钮的全局矩形（更多/设置面板定位用）
     QRect moreButtonGlobalRect() const;
     // "其他"按钮的全局矩形（图形/表格/文字/小工具子面板及"其他"面板定位用）
@@ -71,10 +66,6 @@ signals:
     void zoomInRequested();
     void zoomOutRequested();
     void zoomResetRequested();
-    void addPageRequested();
-    void prevPageRequested();
-    void nextPageRequested();
-    void pagePanelRequested();  // 页码按钮：弹出页数缩略图面板
     void moreRequested();       // 更多按钮：弹出/收起更多面板（互动/保存/打开/设置/退出）
     void otherRequested();      // "其他"按钮：弹出/收起其他工具面板（图形/导图/表格/文字/小工具）
 
@@ -86,10 +77,6 @@ private:
     QButtonGroup* toolGroup_ = nullptr;
     QHash<int, BoardToolButton*> toolButtons_;  // key = static_cast<int>(BoardView::Tool)
     BoardToolButton* zoomResetButton_ = nullptr;
-    BoardToolButton* addPageButton_ = nullptr;
-    BoardToolButton* pageButton_ = nullptr;
-    BoardToolButton* prevButton_ = nullptr;
-    BoardToolButton* nextButton_ = nullptr;
     BoardToolButton* moreButton_ = nullptr;
     BoardToolButton* otherButton_ = nullptr;  // 左侧工具组"其他"入口（非 checkable，仿 moreButton_）
 };

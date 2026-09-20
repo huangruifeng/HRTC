@@ -1787,6 +1787,7 @@ void BoardView::setTool(Tool tool) {
         switch (tool_) {
             case Tool::Select:
             case Tool::Lasso:
+            case Tool::Mouse:
                 setCursor(Qt::ArrowCursor);
                 break;
             case Tool::Pan:
@@ -1845,6 +1846,15 @@ void BoardView::setWidgetKind(int kind) {
     widgetKind_ = qBound(0, kind, 6);  // 0 秒表 / 1 计时器 / 2 计算器 / 3 算盘 / 4 骰子 / 5 大转盘 / 6 点名器
 }
 
+void BoardView::setEraserSize(int size) {
+    eraserSize_ = qMax(8, size);
+    if (tool_ == Tool::Eraser) {  // 橡皮激活中：立即按新尺寸重建预览框位置
+        const QPointF pos = mapToScene(mapFromGlobal(QCursor::pos()));
+        if (scene_.sceneRect().contains(pos))
+            updateEraserPreview(pos);
+    }
+}
+
 void BoardView::clearBoard() {
     data_.Clear();
 }
@@ -1871,6 +1881,16 @@ void BoardView::createPage() {
 
 bool BoardView::deletePage(const QString& pageId) {
     if (!data_.DeletePage(pageId.toStdString()))
+        return false;
+    refreshPageIds();
+    reloadPage();
+    emit pagesChanged();
+    emit currentPageChanged(pageIds_.indexOf(currentPageId_));
+    return true;
+}
+
+bool BoardView::copyPage(const QString& pageId) {
+    if (!data_.CopyPage(pageId.toStdString()))
         return false;
     refreshPageIds();
     reloadPage();
@@ -3251,7 +3271,7 @@ void BoardView::ensureEraserItem() {
     if (eraserPreview_)
         return;
     eraserPreview_ = new QGraphicsRectItem();
-    eraserPreview_->setPen(Qt::NoPen);              // 白色方块：无边框
+    eraserPreview_->setPen(Qt::NoPen);              // 白色长方形：无边框
     eraserPreview_->setBrush(QColor(255, 255, 255, 240));
     eraserPreview_->setZValue(100);
     eraserPreview_->setVisible(false);
@@ -3260,9 +3280,11 @@ void BoardView::ensureEraserItem() {
 
 void BoardView::updateEraserPreview(const QPointF& center) {
     ensureEraserItem();
-    eraserPreview_->setRect(QRectF(center.x() - kEraserSize / 2.0,
-                                   center.y() - kEraserSize / 2.0,
-                                   kEraserSize, kEraserSize));
+    // 横向长方形（宽 = 高 × 宽高比），中心跟随鼠标
+    const qreal w = eraserSize_ * kEraserAspect;
+    eraserPreview_->setRect(QRectF(center.x() - w / 2.0,
+                                   center.y() - eraserSize_ / 2.0,
+                                   w, eraserSize_));
     eraserPreview_->setVisible(true);
 }
 
@@ -3271,9 +3293,10 @@ whiteboard::Point BoardView::toBoardPoint(const QPointF& p) const {
 }
 
 whiteboard::Rect BoardView::eraserRectAt(const QPointF& center) const {
-    const int x = qRound(center.x() - kEraserSize / 2.0);
-    const int y = qRound(center.y() - kEraserSize / 2.0);
-    return whiteboard::Rect(x, y, kEraserSize, kEraserSize);
+    const int w = qRound(eraserSize_ * kEraserAspect);
+    const int x = qRound(center.x() - w / 2.0);
+    const int y = qRound(center.y() - eraserSize_ / 2.0);
+    return whiteboard::Rect(x, y, w, eraserSize_);
 }
 
 QPointF BoardView::clampToScene(const QPointF& p) const {
@@ -4708,8 +4731,9 @@ void BoardView::mousePressEvent(QMouseEvent* event) {
         }
         commitWidgetOptionsEditing();
     }
-    // 抓手工具：左键交给 ScrollHandDrag
-    if (tool_ == Tool::Pan) {
+    // 抓手工具：左键交给 ScrollHandDrag；纯鼠标工具：不拦截画布事件，透传场景
+    //（可点击小工具卡片等；与抓手不同，不启动视图拖拽）
+    if (tool_ == Tool::Pan || tool_ == Tool::Mouse) {
         QGraphicsView::mousePressEvent(event);
         return;
     }
@@ -4877,7 +4901,7 @@ void BoardView::mouseMoveEvent(QMouseEvent* event) {
         QGraphicsView::mouseMoveEvent(event);
         return;
     }
-    if (tool_ == Tool::Pan) {
+    if (tool_ == Tool::Pan || tool_ == Tool::Mouse) {
         QGraphicsView::mouseMoveEvent(event);
         return;
     }
@@ -4944,7 +4968,7 @@ void BoardView::mouseReleaseEvent(QMouseEvent* event) {
         QGraphicsView::mouseReleaseEvent(event);
         return;
     }
-    if (tool_ == Tool::Pan) {
+    if (tool_ == Tool::Pan || tool_ == Tool::Mouse) {
         QGraphicsView::mouseReleaseEvent(event);
         return;
     }
@@ -5136,7 +5160,7 @@ void BoardView::applyToolPreview(uint32_t tool, const std::string& sessionId,
         }
         if (!remoteEraserPreview_ || !remoteEraserPreview_->scene()) {
             remoteEraserPreview_ = new QGraphicsRectItem();
-            remoteEraserPreview_->setPen(Qt::NoPen);  // 样式同本地橡皮预览：白色方块
+            remoteEraserPreview_->setPen(Qt::NoPen);  // 样式同本地橡皮预览：白色长方形
             remoteEraserPreview_->setBrush(QColor(255, 255, 255, 240));
             remoteEraserPreview_->setZValue(99);
             scene_.addItem(remoteEraserPreview_);

@@ -281,6 +281,103 @@ void drawOther(QPainter& p, const QColor& c) {
     p.drawRoundedRect(QRectF(x0 + s + gap, y0 + s + gap, s, s), 3.0, 3.0);
 }
 
+// 鼠标：箭头光标线稿（左上尖头 + 两侧斜边 + 底部缺口）
+void drawMouse(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    QPainterPath cursor;
+    cursor.moveTo(14.0, 10.0);
+    cursor.lineTo(14.0, 37.0);
+    cursor.lineTo(21.0, 30.5);
+    cursor.lineTo(25.5, 39.5);
+    cursor.lineTo(30.0, 37.5);
+    cursor.lineTo(25.5, 28.5);
+    cursor.lineTo(34.0, 28.0);
+    cursor.closeSubpath();
+    p.drawPath(cursor);
+}
+
+// 清屏：板擦（斜置圆角矩形）+ 底部扫除散点
+void drawClear(QPainter& p, const QColor& c) {
+    p.save();
+    p.translate(24.0, 22.0);
+    p.rotate(-30.0);
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(-12.5, -7.0, 25.0, 14.0), 3.5, 3.5);
+    p.drawLine(QPointF(-12.5, -1.0), QPointF(12.5, -1.0));
+    p.restore();
+
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawEllipse(QPointF(12.0, 37.0), 2.0, 2.0);
+    p.drawEllipse(QPointF(19.0, 40.5), 2.0, 2.0);
+    p.drawEllipse(QPointF(27.0, 40.5), 2.0, 2.0);
+    p.drawEllipse(QPointF(34.0, 37.0), 2.0, 2.0);
+}
+
+// 复制：两个错位叠放的小矩形（常见复制图标：后矩形右上、前矩形左下）
+void drawCopy(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawRoundedRect(QRectF(17.0, 8.0, 21.0, 26.0), 3.0, 3.0);
+    p.drawRoundedRect(QRectF(10.0, 14.0, 21.0, 26.0), 3.0, 3.0);
+}
+
+// 矩形 / 圆形 / 椭圆 / 三角形：单形状线框（圆盘外环图形选项）
+void drawRectGlyph(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawRect(QRectF(11.0, 11.0, 26.0, 26.0));
+}
+
+void drawCircleGlyph(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QRectF(10.0, 10.0, 28.0, 28.0));
+}
+
+void drawEllipseGlyph(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    p.drawEllipse(QRectF(7.0, 14.0, 34.0, 20.0));
+}
+
+void drawTriangleGlyph(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    QPainterPath tri;
+    tri.moveTo(24.0, 10.0);
+    tri.lineTo(38.0, 36.0);
+    tri.lineTo(10.0, 36.0);
+    tri.closeSubpath();
+    p.drawPath(tri);
+}
+
+// 色轮：六段色相环（固定彩色，不随激活态变色）
+void drawColorWheel(QPainter& p, const QColor& c) {
+    Q_UNUSED(c);
+    const QColor hues[6] = {
+        QColor(0xE5, 0x3E, 0x3E), QColor(0xE8, 0xA3, 0x3E), QColor(0x7A, 0xB8, 0x4A),
+        QColor(0x3E, 0xA8, 0x9E), QColor(0x3E, 0x6E, 0xC4), QColor(0x9A, 0x5A, 0xC9),
+    };
+    const QRectF rect(10.0, 10.0, 28.0, 28.0);  // 圆心 24,24 半径 14
+    p.setPen(Qt::NoPen);
+    p.setBrush(Qt::NoBrush);
+    for (int i = 0; i < 6; ++i) {
+        QPainterPath arc;
+        arc.arcMoveTo(rect, i * 60.0);
+        arc.arcTo(rect, i * 60.0, 60.0);
+        QColor h = hues[i];
+        h.setAlpha(230);
+        p.setPen(QPen(h, 7.0, Qt::SolidLine, Qt::RoundCap));
+        p.drawPath(arc);
+    }
+    p.setPen(Qt::NoPen);
+    p.setBrush(Qt::white);
+    p.drawEllipse(QPointF(24.0, 24.0), 4.0, 4.0);
+}
+
 }  // namespace
 
 QPixmap pixmap(Glyph glyph, bool active) {
@@ -352,6 +449,30 @@ QPixmap pixmap(Glyph glyph, bool active) {
             break;
         case Glyph::Other:
             drawOther(p, color);
+            break;
+        case Glyph::Mouse:
+            drawMouse(p, color);
+            break;
+        case Glyph::Clear:
+            drawClear(p, color);
+            break;
+        case Glyph::Copy:
+            drawCopy(p, color);
+            break;
+        case Glyph::Rect:
+            drawRectGlyph(p, color);
+            break;
+        case Glyph::Circle:
+            drawCircleGlyph(p, color);
+            break;
+        case Glyph::Ellipse:
+            drawEllipseGlyph(p, color);
+            break;
+        case Glyph::Triangle:
+            drawTriangleGlyph(p, color);
+            break;
+        case Glyph::ColorWheel:
+            drawColorWheel(p, color);
             break;
     }
     return pm;

@@ -12,8 +12,9 @@
 #include "WhiteboardSession.h"
 
 class BoardToolBar;
+class BoardDisk;
+class PageRail;
 class EraserPanel;
-class SlideManagerPanel;
 class SettingsPanel;
 class MorePanel;
 class ShapePickerPanel;
@@ -25,9 +26,10 @@ class OtherToolsPanel;
 class QEvent;
 class QResizeEvent;
 
-// 主窗口：全屏黑板画布 + 底部居中悬浮工具栏（工具 / 功能 / 页面三组）；
+// 主窗口：全屏黑板画布 + 两种工具栏模式（底部居中悬浮工具栏 / 桌面圆盘悬浮球，
+// 设置面板切换）+ 左侧 PageRail 页面栏（翻页/页码/添加页/复制/删页）；
 // 笔设置与滑动清屏为工具栏按钮弹出的面板（Qt::Popup）；窗口锁定 16:9 缩放。
-// 显示模式：窗口模式（默认，可缩放 16:9 窗口）/ 黑板模式（全屏无标题栏、盖任务栏，
+// 显示模式：窗口模式（默认，可缩放 16:9 窗口）/ 黑板模式（全屏无标题栏、
 // 画布取 16:9 最大内接矩形居中）。
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -47,12 +49,11 @@ private:
     void onExitApp();                        // 退出程序（入口在"更多"面板）
     void onPrevPage();
     void onNextPage();
-    void onPagePanelRequested();             // 页码按钮：弹出/收起缩略图面板
-    void rebuildPagePanel();                 // 重建缩略图条目（页数据 + 当前页）
-    void positionPagePanel();                // 面板定位到页码按钮上方
-    void onPageActivated(int index);         // 点击缩略图切页并关闭面板
-    void onPageDeleteRequested(int index);   // 点击缩略图删除按钮
     void updatePageButtons();
+    void rebuildPageRail();                 // 重建页面栏缩略图（页数据 + 当前页）
+    void onPageActivated(int index);         // 点击缩略图切页（面板保持展开）
+    void onPageDeleteRequested(int index);   // 点击缩略图删除按钮
+    void onCopyPage(int index);              // 点击缩略图复制按钮（插入源页后并跳转）
     void onSettingsRequested();                  // 设置入口：弹出/收起设置面板
     void rebuildSettingsPanel();                 // 重建背景网格（当前背景 + 面板尺寸）
     void positionSettingsPanel();                // 面板定位到更多按钮上方
@@ -65,16 +66,21 @@ private:
     void onOpenBoard();                          // 从文件打开白板（弹出路径选择）
     void onBackgroundSelected(const QString& key, const QPixmap& pixmap);  // 应用黑板背景
     void setDisplayMode(bool boardMode);         // 切换显示模式（黑板=全屏 / 窗口）
+    void setToolBarMode(bool diskMode);          // 切换工具栏模式（桌面圆盘 / 底部工具栏）
     void updateBoardGeometry();                  // 计算画布几何（黑板模式 16:9 居中）
     void updateSessionStatus(const QString& text);
+    QRect anchorRect(BoardView::Tool tool) const;  // 弹窗面板锚点（按当前工具栏模式取工具栏/圆盘）
+    QRect moreAnchorRect() const;                  // 更多/设置面板锚点
     void showPanelAbove(QWidget* panel, BoardView::Tool tool);  // 定位并弹出/收起面板
     void applyStyleSheet();
 
     BoardView* view_ = nullptr;
-    BoardToolBar* toolBar_ = nullptr;
+    BoardToolBar* toolBar_ = nullptr;   // 底部工具栏模式
+    BoardDisk* disk_ = nullptr;         // 桌面圆盘模式（悬浮球）
+    PageRail* pageRail_ = nullptr;      // 左侧页面栏（两种模式共用）
+    bool diskMode_ = false;             // 当前工具栏模式（true=桌面圆盘）
     PenSettingPanel* penPanel_ = nullptr;
     EraserPanel* eraserPanel_ = nullptr;
-    SlideManagerPanel* pagePanel_ = nullptr;
     SettingsPanel* settingsPanel_ = nullptr;
     MorePanel* morePanel_ = nullptr;
     ShapePickerPanel* shapePanel_ = nullptr;
@@ -87,6 +93,7 @@ private:
     QWidget* central_ = nullptr;      // 中央区域（画布 + 悬浮工具栏）
     bool boardMode_ = false;          // 当前显示模式（true=黑板模式全屏）
     QByteArray windowedGeometry_;     // 窗口模式几何（切全屏前保存，切回时恢复）
+    qreal zoomPercent_ = 100.0;       // 当前缩放比例（圆盘/工具栏同步显示）
     uint32_t penColor_ = 0x00FFFFFF;  // 默认白色（COLORREF 语义 0x00BBGGRR）
     int penWidth_ = 3;                // 默认细档（3 / 6 / 12）
     uint32_t textColor_ = 0x00FFFFFF; // 文字工具颜色（COLORREF 语义 0x00BBGGRR，默认白色）
@@ -96,8 +103,6 @@ private:
     // 更多面板因点击更多按钮而关闭（Popup 在按下阶段自动关闭）：
     // 同一次点击的释放阶段不重开面板
     bool moreButtonClosePending_ = false;
-    // 页数面板因点击页码按钮而关闭：同上
-    bool pageButtonClosePending_ = false;
     // "其他"面板因点击"其他"按钮而关闭：同上（释放阶段不重开）
     bool otherButtonClosePending_ = false;
     // 笔 / 擦除 / 图形 / 表格 / 文字 / 小工具面板因点击对应工具按钮在按下阶段自动关闭：同上（释放阶段不重开）

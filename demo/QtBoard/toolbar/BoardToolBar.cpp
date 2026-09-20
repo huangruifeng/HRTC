@@ -168,53 +168,20 @@ BoardToolBar::BoardToolBar(QWidget* parent) : QWidget(parent) {
     connect(zoomResetButton_, &QToolButton::clicked, this, &BoardToolBar::zoomResetRequested);
     connect(zoomInButton, &QToolButton::clicked, this, &BoardToolBar::zoomInRequested);
 
-    // ---------- 右侧页面组 ----------
+    // ---------- 右侧：更多入口 ----------
+    // 更多：面板风格应用级入口（保存/打开/设置），置于工具栏最右端；
+    // 页面组（添加页/翻页/页码）已拆出至左侧 PageRail 页面栏
     auto* rightLayout = new QHBoxLayout;
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(6);
 
-    BoardToolButton* addPageButton = createButton(
-        QStringLiteral("添加页"),
-        QPixmap(QStringLiteral(":/icons/add_page_normal.png")),
-        QPixmap(QStringLiteral(":/icons/add_page_pressed.png")), false);
-    addPageButton->setDisabledPixmap(QPixmap(QStringLiteral(":/icons/add_page_disabled.png")));
-    rightLayout->addWidget(addPageButton);
-    addPageButton_ = addPageButton;
-
-    prevButton_ = createButton(
-        QStringLiteral("上一页"),
-        QPixmap(QStringLiteral(":/icons/prev_normal.png")),
-        QPixmap(QStringLiteral(":/icons/prev_pressed.png")), false);
-    prevButton_->setDisabledPixmap(QPixmap(QStringLiteral(":/icons/prev_disabled.png")));
-    rightLayout->addWidget(prevButton_);
-
-    pageButton_ = createButton(
-        QStringLiteral("1/1"),
-        QPixmap(QStringLiteral(":/icons/page_normal.png")),
-        QPixmap(QStringLiteral(":/icons/page_pressed.png")), false);
-    rightLayout->addWidget(pageButton_);
-
-    nextButton_ = createButton(
-        QStringLiteral("下一页"),
-        QPixmap(QStringLiteral(":/icons/next_normal.png")),
-        QPixmap(QStringLiteral(":/icons/next_pressed.png")), false);
-    nextButton_->setDisabledPixmap(QPixmap(QStringLiteral(":/icons/next_disabled.png")));
-    rightLayout->addWidget(nextButton_);
-
-    // 更多：面板风格应用级入口（保存/打开/设置），置于工具栏最右端
     moreButton_ = createButton(
         QStringLiteral("更多"),
         BoardIcons::pixmap(BoardIcons::Glyph::More, false),
         BoardIcons::pixmap(BoardIcons::Glyph::More, true), false);
     rightLayout->addWidget(moreButton_);
 
-    connect(addPageButton, &QToolButton::clicked, this, &BoardToolBar::addPageRequested);
-    connect(prevButton_, &QToolButton::clicked, this, &BoardToolBar::prevPageRequested);
-    connect(nextButton_, &QToolButton::clicked, this, &BoardToolBar::nextPageRequested);
     connect(moreButton_, &QToolButton::clicked, this, &BoardToolBar::moreRequested);
-    connect(pageButton_, &QToolButton::clicked, this, [this]() {
-        emit pagePanelRequested();
-    });
 
     // ---------- 组装 ----------
     root->addLayout(leftLayout);
@@ -272,33 +239,12 @@ void BoardToolBar::setZoomPercent(qreal percent) {
     zoomResetButton_->setText(QStringLiteral("%1%").arg(qRound(percent)));
 }
 
-void BoardToolBar::setPageInfo(int index, int total) {
-    pageButton_->setText(QStringLiteral("%1/%2").arg(index).arg(total));
-}
-
-void BoardToolBar::setPrevNextEnabled(bool prev, bool next) {
-    prevButton_->setEnabled(prev);
-    nextButton_->setEnabled(next);
-}
-
-void BoardToolBar::setAddPageEnabled(bool enabled) {
-    addPageButton_->setEnabled(enabled);
-}
-
-void BoardToolBar::setPageButtonActive(bool active) {
-    pageButton_->setActiveState(active);
-}
-
 void BoardToolBar::setMoreButtonActive(bool active) {
     moreButton_->setActiveState(active);
 }
 
 void BoardToolBar::setOtherButtonActive(bool active) {
     otherButton_->setActiveState(active);
-}
-
-QRect BoardToolBar::pageButtonGlobalRect() const {
-    return QRect(pageButton_->mapToGlobal(QPoint(0, 0)), pageButton_->size());
 }
 
 QRect BoardToolBar::moreButtonGlobalRect() const {

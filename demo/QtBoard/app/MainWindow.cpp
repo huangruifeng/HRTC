@@ -23,16 +23,17 @@
 
 #include <chrono>
 
+#include "BoardDisk.h"
 #include "BoardToolBar.h"
 #include "BoardUtil.h"
 #include "EraserPanel.h"
 #include "JoinRoomDialog.h"
 #include "MorePanel.h"
 #include "OtherToolsPanel.h"
+#include "PageRail.h"
 #include "PenSettingPanel.h"
 #include "SettingsPanel.h"
 #include "ShapePickerPanel.h"
-#include "SlideManagerPanel.h"
 #include "TableSetupPanel.h"
 #include "TextSetupPanel.h"
 #include "WidgetSetupPanel.h"
@@ -199,9 +200,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     view_ = new BoardView(this);
     toolBar_ = new BoardToolBar(this);
+    disk_ = new BoardDisk(this);
+    pageRail_ = new PageRail(this);
     penPanel_ = new PenSettingPanel(this);
     eraserPanel_ = new EraserPanel(this);
-    pagePanel_ = new SlideManagerPanel(this);
     settingsPanel_ = new SettingsPanel(this);
     morePanel_ = new MorePanel(this);
     shapePanel_ = new ShapePickerPanel(this);
@@ -211,6 +213,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     otherPanel_ = new OtherToolsPanel(this);
 
     // 中央区域：画布手动几何（黑板模式 16:9 居中，窗口模式铺满）+ 工具栏悬浮底部居中（距底 15px）
+    // + 圆盘/页面栏悬浮（几何自管理：圆盘右缘中部、页面栏左缘贴边）
     central_ = new QWidget(this);
     central_->setObjectName(QStringLiteral("boardCentral"));
     auto* grid = new QGridLayout(central_);
@@ -218,15 +221,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     grid->setSpacing(0);
     view_->setParent(central_);  // 画布不入布局：几何由 updateBoardGeometry() 控制
     grid->addWidget(toolBar_, 0, 0, Qt::AlignBottom | Qt::AlignHCenter);
+    disk_->setParent(central_);       // 悬浮球：不入布局，几何自管理
+    pageRail_->setParent(central_);   // 页面栏标签：同上
     setCentralWidget(central_);
     toolBar_->raise();
+    disk_->raise();
+    pageRail_->raise();
+    disk_->hide();  // 默认底部工具栏模式（设置面板可切换）
     central_->installEventFilter(this);  // 中央区域尺寸变化时重算画布几何
-    updateBoardGeometry();               // 初始几何
+    updateBoardGeometry();               // 初始几何（含页面栏/圆盘活动范围与初始位）
 
     // ---------- 工具 / 功能组 ----------
     connect(toolBar_, &BoardToolBar::toolSelected, this, &MainWindow::onToolSelected);
     connect(view_, &BoardView::toolChanged, this, [this](BoardView::Tool tool) {
         toolBar_->setCurrentTool(tool);
+        disk_->setCurrentTool(tool);  // 悬浮球图标/内环高亮/外环焦点同步
         otherPanel_->setCurrentIndex(otherToolIndex(tool));  // 当前工具映射到"其他"面板条目
         updateOtherButtonState();
     });
@@ -236,29 +245,80 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(toolBar_, &BoardToolBar::zoomOutRequested, view_, &BoardView::zoomOut);
     connect(toolBar_, &BoardToolBar::zoomResetRequested, view_, &BoardView::resetZoom);
     connect(view_, &BoardView::zoomChanged, this, [this](qreal percent) {
+        zoomPercent_ = percent;
         toolBar_->setZoomPercent(percent);
+        disk_->setZoomPercent(percent);
     });
 
-    // ---------- 页面组 ----------
-    connect(toolBar_, &BoardToolBar::addPageRequested, view_, &BoardView::createPage);
-    connect(toolBar_, &BoardToolBar::prevPageRequested, this, &MainWindow::onPrevPage);
-    connect(toolBar_, &BoardToolBar::nextPageRequested, this, &MainWindow::onNextPage);
-    connect(toolBar_, &BoardToolBar::pagePanelRequested, this, &MainWindow::onPagePanelRequested);
+    // ---------- 页面栏（左侧常驻，两种模式共用） ----------
+    connect(pageRail_, &PageRail::prevPageRequested, this, &MainWindow::onPrevPage);
+    connect(pageRail_, &PageRail::nextPageRequested, this, &MainWindow::onNextPage);
+    connect(pageRail_, &PageRail::addPageRequested, view_, &BoardView::createPage);
+    connect(pageRail_, &PageRail::pageActivated, this, &MainWindow::onPageActivated);
+    connect(pageRail_, &PageRail::pageDeleteRequested, this, &MainWindow::onPageDeleteRequested);
+    connect(pageRail_, &PageRail::pageCopyRequested, this, &MainWindow::onCopyPage);
+    connect(pageRail_, &PageRail::expandRequested, this, &MainWindow::rebuildPageRail);
     connect(view_, &BoardView::pagesChanged, this, &MainWindow::updatePageButtons);
     connect(view_, &BoardView::currentPageChanged, this, &MainWindow::updatePageButtons);
 
-    // 页数缩略图面板：选页 / 删页 / 关闭后复位按钮激活态
-    connect(pagePanel_, &SlideManagerPanel::pageActivated, this, &MainWindow::onPageActivated);
-    connect(pagePanel_, &SlideManagerPanel::pageDeleteRequested, this,
-            &MainWindow::onPageDeleteRequested);
-    connect(pagePanel_, &SlideManagerPanel::closed, this, [this]() {
-        toolBar_->setPageButtonActive(false);
-        // Popup 因点击页码按钮而在按下阶段自动关闭：置标志，
-        // 防止同一次点击的释放阶段（clicked）重开面板
-        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
-            toolBar_->pageButtonGlobalRect().contains(QCursor::pos()))
-            pageButtonClosePending_ = true;
+    // ---------- 桌面圆盘（悬浮球模式） ----------
+    // 工具类目（擦除/选择/套索/鼠标）：直切工具，toolChanged 回传同步双工具栏
+    connect(disk_, &BoardDisk::toolSelected, view_, &BoardView::setTool);
+    // 笔参数（类型/颜色/粗细）：与底部笔面板同一处理（含荧光笔 alpha 编码）
+    connect(disk_, &BoardDisk::penParamChanged, this, &MainWindow::onPenChanged);
+    connect(disk_, &BoardDisk::eraserSizeChanged, view_, &BoardView::setEraserSize);
+    connect(disk_, &BoardDisk::undoRequested, view_, &BoardView::undo);
+    connect(disk_, &BoardDisk::redoRequested, view_, &BoardView::redo);
+    connect(disk_, &BoardDisk::zoomInRequested, view_, &BoardView::zoomIn);
+    connect(disk_, &BoardDisk::zoomOutRequested, view_, &BoardView::zoomOut);
+    connect(disk_, &BoardDisk::zoomResetRequested, view_, &BoardView::resetZoom);
+    // 外环"清屏"：滑动清屏面板锚定圆盘上方（面板已开时点击该钮收起：pending 拦截重开）
+    connect(disk_, &BoardDisk::clearPanelRequested, this, [this]() {
+        if (eraserButtonClosePending_) {
+            eraserButtonClosePending_ = false;
+            return;
+        }
+        showPanelAbove(eraserPanel_, BoardView::Tool::Eraser);
     });
+    // 更多外环：文字/表格切工具并弹参数面板（锚定圆盘）；形状直接切图形工具
+    connect(disk_, &BoardDisk::textToolRequested, this, [this]() {
+        if (textButtonClosePending_) {  // 面板已开时点击该钮收起：pending 拦截重开
+            textButtonClosePending_ = false;
+            return;
+        }
+        view_->setTool(BoardView::Tool::Text);
+        showPanelAbove(textPanel_, BoardView::Tool::Text);
+    });
+    connect(disk_, &BoardDisk::tableToolRequested, this, [this]() {
+        if (tableButtonClosePending_) {  // 同上
+            tableButtonClosePending_ = false;
+            return;
+        }
+        view_->setTool(BoardView::Tool::Table);
+        showPanelAbove(tablePanel_, BoardView::Tool::Table);
+    });
+    // 外环"图形"：四种形状合一入口 → 弹形状选择面板（选中后经 shapeSelected 切图形工具）
+    connect(disk_, &BoardDisk::shapePanelRequested, this, [this]() {
+        if (shapeButtonClosePending_) {  // 面板已开时点击该钮收起：pending 拦截重开
+            shapeButtonClosePending_ = false;
+            return;
+        }
+        shapePanel_->setCurrentKind(view_->shapeKind());  // 恢复当前形状选中态
+        view_->setTool(BoardView::Tool::Shape);
+        showPanelAbove(shapePanel_, BoardView::Tool::Shape);
+    });
+    // 外环"小工具"：切小工具并弹类型选择面板
+    connect(disk_, &BoardDisk::widgetToolRequested, this, [this]() {
+        if (widgetButtonClosePending_) {  // 同上
+            widgetButtonClosePending_ = false;
+            return;
+        }
+        widgetPanel_->setCurrent(widgetKind_);  // 恢复上次类型选择态
+        view_->setTool(BoardView::Tool::Widget);
+        showPanelAbove(widgetPanel_, BoardView::Tool::Widget);
+    });
+    // 更多外环"菜单"：复用更多面板（互动/保存/打开/设置/退出；锚点随模式切换）
+    connect(disk_, &BoardDisk::menuRequested, this, &MainWindow::onMoreRequested);
 
     // ---------- 更多面板（互动 / 保存 / 打开 / 设置 / 退出） ----------
     connect(toolBar_, &BoardToolBar::moreRequested, this, &MainWindow::onMoreRequested);
@@ -275,11 +335,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(morePanel_, &MorePanel::exitRequested, this, &MainWindow::onExitApp);
     connect(morePanel_, &MorePanel::closed, this, [this]() {
         toolBar_->setMoreButtonActive(false);
-        // Popup 因点击更多按钮而在按下阶段自动关闭：置标志，
-        // 防止同一次点击的释放阶段（clicked）重开面板
-        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
-            toolBar_->moreButtonGlobalRect().contains(QCursor::pos()))
-            moreButtonClosePending_ = true;
+        // Popup 因点击更多按钮/圆盘菜单钮而在按下阶段自动关闭：置标志，
+        // 防止同一次点击的释放阶段重开面板（锚点随工具栏模式取工具栏/圆盘）
+        if (QGuiApplication::mouseButtons() & Qt::LeftButton) {
+            const bool onAnchor =
+                diskMode_ ? disk_->diskGlobalRect().contains(QCursor::pos())
+                          : toolBar_->moreButtonGlobalRect().contains(QCursor::pos());
+            if (onAnchor)
+                moreButtonClosePending_ = true;
+        }
     });
 
     // ---------- "其他"工具面板（图形 / 导图 / 表格 / 文字 / 小工具汇总入口） ----------
@@ -333,6 +397,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(settingsPanel_, &SettingsPanel::backgroundSelected, this,
             &MainWindow::onBackgroundSelected);
     connect(settingsPanel_, &SettingsPanel::displayModeChanged, this, &MainWindow::setDisplayMode);
+    connect(settingsPanel_, &SettingsPanel::toolBarModeChanged, this, &MainWindow::setToolBarMode);
 
     // ---------- 笔设置 / 滑动清屏面板 ----------
     connect(penPanel_, &PenSettingPanel::penChanged, this, &MainWindow::onPenChanged);
@@ -347,9 +412,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     connect(eraserPanel_, &EraserPanel::closed, this, [this]() {
         toolBar_->setToolPanelExtended(BoardView::Tool::Eraser, false);
-        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
-            toolBar_->toolButtonGlobalRect(BoardView::Tool::Eraser).contains(QCursor::pos()))
-            eraserButtonClosePending_ = true;
+        // 按下阶段关闭置标志防释放阶段重开（底部=擦除按钮 / 圆盘=外环清屏钮）
+        if (QGuiApplication::mouseButtons() & Qt::LeftButton) {
+            const bool onAnchor =
+                diskMode_ ? disk_->diskGlobalRect().contains(QCursor::pos())
+                          : toolBar_->toolButtonGlobalRect(BoardView::Tool::Eraser)
+                                .contains(QCursor::pos());
+            if (onAnchor)
+                eraserButtonClosePending_ = true;
+        }
     });
 
     // ---------- 图形 / 表格面板（工具栏弹出形状与行列选择） ----------
@@ -360,10 +431,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     connect(shapePanel_, &ShapePickerPanel::closed, this, [this]() {
         toolBar_->setToolPanelExtended(BoardView::Tool::Shape, false);
-        // 若因点击图形工具按钮在按下阶段自动关闭：置标志，防止释放阶段重开
-        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
-            toolBar_->toolButtonGlobalRect(BoardView::Tool::Shape).contains(QCursor::pos()))
-            shapeButtonClosePending_ = true;
+        // 按下阶段关闭置标志防释放阶段重开（底部=其他按钮 / 圆盘=外环图形钮）
+        if (QGuiApplication::mouseButtons() & Qt::LeftButton) {
+            const bool onAnchor =
+                diskMode_ ? disk_->diskGlobalRect().contains(QCursor::pos())
+                          : toolBar_->toolButtonGlobalRect(BoardView::Tool::Shape)
+                                .contains(QCursor::pos());
+            if (onAnchor)
+                shapeButtonClosePending_ = true;
+        }
     });
     connect(tablePanel_, &TableSetupPanel::tableSizeChanged, this, [this](int rows, int cols) {
         tablePanel_->setCurrentSize(rows, cols);
@@ -372,9 +448,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     connect(tablePanel_, &TableSetupPanel::closed, this, [this]() {
         toolBar_->setToolPanelExtended(BoardView::Tool::Table, false);
-        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
-            toolBar_->toolButtonGlobalRect(BoardView::Tool::Table).contains(QCursor::pos()))
-            tableButtonClosePending_ = true;
+        // 按下阶段关闭置标志防释放阶段重开（底部=表格按钮 / 圆盘=外环表格钮）
+        if (QGuiApplication::mouseButtons() & Qt::LeftButton) {
+            const bool onAnchor =
+                diskMode_ ? disk_->diskGlobalRect().contains(QCursor::pos())
+                          : toolBar_->toolButtonGlobalRect(BoardView::Tool::Table)
+                                .contains(QCursor::pos());
+            if (onAnchor)
+                tableButtonClosePending_ = true;
+        }
     });
     connect(textPanel_, &TextSetupPanel::fontSizeChanged, this, [this](int size) {
         textPanel_->setCurrentSize(size);
@@ -387,9 +469,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     connect(textPanel_, &TextSetupPanel::closed, this, [this]() {
         toolBar_->setToolPanelExtended(BoardView::Tool::Text, false);
-        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
-            toolBar_->toolButtonGlobalRect(BoardView::Tool::Text).contains(QCursor::pos()))
-            textButtonClosePending_ = true;
+        // 按下阶段关闭置标志防释放阶段重开（底部=文字按钮 / 圆盘=外环文字钮）
+        if (QGuiApplication::mouseButtons() & Qt::LeftButton) {
+            const bool onAnchor =
+                diskMode_ ? disk_->diskGlobalRect().contains(QCursor::pos())
+                          : toolBar_->toolButtonGlobalRect(BoardView::Tool::Text)
+                                .contains(QCursor::pos());
+            if (onAnchor)
+                textButtonClosePending_ = true;
+        }
     });
 
     // ---------- 小工具面板（秒表/计时器/计算器/算盘/骰子/大转盘/点名器类型选择；参数在卡片内设置） ----------
@@ -401,10 +489,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     connect(widgetPanel_, &WidgetSetupPanel::closed, this, [this]() {
         toolBar_->setToolPanelExtended(BoardView::Tool::Widget, false);
-        // 若因点击小工具按钮在按下阶段自动关闭：置标志，防止释放阶段重开
-        if ((QGuiApplication::mouseButtons() & Qt::LeftButton) &&
-            toolBar_->toolButtonGlobalRect(BoardView::Tool::Widget).contains(QCursor::pos()))
-            widgetButtonClosePending_ = true;
+        // 按下阶段关闭置标志防释放阶段重开（底部=其他按钮 / 圆盘=外环小工具钮）
+        if (QGuiApplication::mouseButtons() & Qt::LeftButton) {
+            const bool onAnchor =
+                diskMode_ ? disk_->diskGlobalRect().contains(QCursor::pos())
+                          : toolBar_->toolButtonGlobalRect(BoardView::Tool::Widget)
+                                .contains(QCursor::pos());
+            if (onAnchor)
+                widgetButtonClosePending_ = true;
+        }
     });
 
     // 初始状态：书写工具 + 笔宽 3 + 白色 + 100%
@@ -414,6 +507,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     view_->setTool(BoardView::Tool::Pen);
     toolBar_->setCurrentTool(BoardView::Tool::Pen);
     toolBar_->setZoomPercent(100.0);
+    disk_->setZoomPercent(100.0);
+    disk_->setPenState(PenSettingPanel::PenKind::Normal, penColor_, penWidth_);  // 圆盘外环选中态
     penPanel_->setCurrent(PenSettingPanel::PenKind::Normal, penColor_, penWidth_);
     textPanel_->setCurrentColor(textColor_);
     view_->setWidgetKind(widgetKind_);  // 小工具默认秒表（类型 0~6，参数在卡片内设置）
@@ -535,6 +630,24 @@ void MainWindow::onToolSelected(BoardView::Tool tool) {
     }
 }
 
+// 弹窗面板锚点：底部模式取工具栏对应按钮矩形（无按钮则退回"其他"按钮，
+// 5 类工具已移入"其他"面板）；圆盘模式取圆盘矩形
+QRect MainWindow::anchorRect(BoardView::Tool tool) const {
+    if (diskMode_)
+        return disk_->diskGlobalRect();
+    QRect rect = toolBar_->toolButtonGlobalRect(tool);
+    if (rect.isNull())
+        rect = toolBar_->otherButtonGlobalRect();
+    return rect;
+}
+
+// 更多/设置面板锚点：底部模式取更多按钮，圆盘模式取圆盘
+QRect MainWindow::moreAnchorRect() const {
+    if (diskMode_)
+        return disk_->diskGlobalRect();
+    return toolBar_->moreButtonGlobalRect();
+}
+
 // 面板水平居中对齐触发按钮，位于按钮上方 8px
 void MainWindow::showPanelAbove(QWidget* panel, BoardView::Tool tool) {
     if (panel->isVisible()) {  // 再次点击同一工具按钮：收起面板
@@ -542,9 +655,7 @@ void MainWindow::showPanelAbove(QWidget* panel, BoardView::Tool tool) {
         return;
     }
 
-    QRect buttonRect = toolBar_->toolButtonGlobalRect(tool);
-    if (buttonRect.isNull())
-        buttonRect = toolBar_->otherButtonGlobalRect();  // 5 类工具已移入"其他"面板：子面板锚定"其他"按钮
+    QRect buttonRect = anchorRect(tool);  // 锚点随工具栏模式（底部工具栏 / 圆盘）
     if (buttonRect.isNull())
         return;
 
@@ -580,6 +691,7 @@ void MainWindow::onPenChanged(PenSettingPanel::PenKind kind, uint32_t color, int
     view_->setPenColor(penColor_);
     view_->setPenWidth(penWidth_);
     view_->setTool(BoardView::Tool::Pen);
+    disk_->setPenState(kind, color, width);  // 圆盘外环选中态同步（两模式状态互通）
 }
 
 // 滑动清屏：清空当前页并切回书写
@@ -607,64 +719,23 @@ void MainWindow::onNextPage() {
 void MainWindow::updatePageButtons() {
     const QStringList pages = view_->pageIds();
     const int index = pages.indexOf(view_->currentPageId());
-    toolBar_->setPageInfo(index + 1, pages.size());
-    toolBar_->setPrevNextEnabled(index > 0, index >= 0 && index < pages.size() - 1);
-    toolBar_->setAddPageEnabled(pages.size() < BoardView::kMaxPages);  // 页数上限 20
-    if (pagePanel_->isVisible())  // 面板展开中：同步刷新缩略图
-        rebuildPagePanel();
+    pageRail_->setPageInfo(index, pages.size());  // 页码标签 + 面板翻页钮可用态
+    if (pageRail_->expanded())  // 面板展开中：同步刷新缩略图
+        rebuildPageRail();
 }
 
-// 页码按钮：弹出/收起页数缩略图面板
-void MainWindow::onPagePanelRequested() {
-    if (pagePanel_->isVisible()) {
-        pagePanel_->hide();  // hideEvent 中复位按钮激活态
-        return;
-    }
-    // 同一次点击的按下阶段 Popup 已自动关闭面板（closed 时置标志）→ 视为收起，不重开
-    if (pageButtonClosePending_) {
-        pageButtonClosePending_ = false;
-        return;
-    }
-    rebuildPagePanel();
-    positionPagePanel();
-    pagePanel_->show();
-    toolBar_->setPageButtonActive(true);
-}
-
-// 重建缩略图条目：全量页数据（数据层深拷贝）+ 当前页下标 + 当前背景铺底
-void MainWindow::rebuildPagePanel() {
+// 重建页面栏缩略图条目：全量页数据（数据层深拷贝）+ 当前页下标 + 当前背景铺底
+void MainWindow::rebuildPageRail() {
     const std::vector<whiteboard::Page> pages = view_->allPages();
     const int index = view_->pageIds().indexOf(view_->currentPageId());
-    pagePanel_->rebuild(pages, index, view_->boardBackground());
+    pageRail_->rebuild(pages, index, view_->boardBackground());
 }
 
-// 面板定位：水平居中于页码按钮，位于其上方 8px（防出屏）
-void MainWindow::positionPagePanel() {
-    const QRect buttonRect = toolBar_->pageButtonGlobalRect();
-    QPoint pos(buttonRect.center().x() - pagePanel_->width() / 2,
-               buttonRect.top() - pagePanel_->height() - 8);
-
-    QScreen* screen = QGuiApplication::screenAt(buttonRect.center());
-    if (!screen)
-        screen = QGuiApplication::primaryScreen();
-    if (screen) {
-        const QRect available = screen->availableGeometry();
-        const int minX = available.left() + 8;
-        const int maxX = available.right() - pagePanel_->width() - 8;
-        pos.setX(maxX > minX ? qBound(minX, pos.x(), maxX) : minX);
-        const int minY = available.top() + 8;
-        const int maxY = available.bottom() - pagePanel_->height() - 8;
-        pos.setY(maxY > minY ? qBound(minY, pos.y(), maxY) : minY);
-    }
-    pagePanel_->move(pos);
-}
-
-// 点击缩略图：切换页面并关闭面板
+// 点击缩略图：切换页面（面板保持展开，currentPageChanged → 重建条目）
 void MainWindow::onPageActivated(int index) {
     const QStringList pages = view_->pageIds();
     if (index < 0 || index >= pages.size())
         return;
-    pagePanel_->hide();
     view_->selectPage(pages.at(index));
 }
 
@@ -673,8 +744,15 @@ void MainWindow::onPageDeleteRequested(int index) {
     const QStringList pages = view_->pageIds();
     if (pages.size() <= 1 || index < 0 || index >= pages.size())
         return;
-    view_->deletePage(pages.at(index));  // pagesChanged → updatePageButtons → 面板重建
-    positionPagePanel();                 // 高度变化后重新定位
+    view_->deletePage(pages.at(index));  // pagesChanged → updatePageButtons → 面板重建（高度自适应重定位）
+}
+
+// 复制指定页：插入源页之后并跳转到新页（数据层深拷贝 + 逐元素网络同步）
+void MainWindow::onCopyPage(int index) {
+    const QStringList pages = view_->pageIds();
+    if (pages.size() >= BoardView::kMaxPages || index < 0 || index >= pages.size())
+        return;
+    view_->copyPage(pages.at(index));  // pagesChanged → updatePageButtons → 面板重建
 }
 
 // ---------- 设置 / 更多 / 保存打开 ----------
@@ -706,9 +784,9 @@ void MainWindow::onMoreRequested() {
     toolBar_->setMoreButtonActive(true);
 }
 
-// 面板定位：水平居中于更多按钮，位于其上方 8px（防出屏）
+// 面板定位：水平居中于更多按钮/圆盘，位于其上方 8px（防出屏）
 void MainWindow::positionMorePanel() {
-    const QRect buttonRect = toolBar_->moreButtonGlobalRect();
+    const QRect buttonRect = moreAnchorRect();  // 锚点随工具栏模式
     QPoint pos(buttonRect.center().x() - morePanel_->width() / 2,
                buttonRect.top() - morePanel_->height() - 8);
 
@@ -829,9 +907,9 @@ void MainWindow::rebuildSettingsPanel() {
     settingsPanel_->rebuild(backgroundKey_);
 }
 
-// 面板定位：水平居中于设置按钮，位于其上方 8px（防出屏）
+// 面板定位：水平居中于更多按钮/圆盘，位于其上方 8px（防出屏）
 void MainWindow::positionSettingsPanel() {
-    const QRect buttonRect = toolBar_->moreButtonGlobalRect();
+    const QRect buttonRect = moreAnchorRect();  // 锚点随工具栏模式
     QPoint pos(buttonRect.center().x() - settingsPanel_->width() / 2,
                buttonRect.top() - settingsPanel_->height() - 8);
 
@@ -855,8 +933,8 @@ void MainWindow::onBackgroundSelected(const QString& key, const QPixmap& pixmap)
     backgroundKey_ = key;
     backgroundPixmap_ = pixmap;
     view_->setBoardBackground(pixmap);
-    if (pagePanel_->isVisible())
-        rebuildPagePanel();
+    if (pageRail_->expanded())  // 页面栏展开中：缩略图以新背景重建
+        rebuildPageRail();
 }
 
 // ---------- 显示模式 ----------
@@ -881,24 +959,62 @@ void MainWindow::setDisplayMode(bool boardMode) {
     updateBoardGeometry();
 }
 
+// 切换工具栏模式：底部工具栏 ↔ 桌面圆盘（悬浮球）；收起全部弹窗面板，
+// 圆盘收起并回灌共享状态（工具/笔参数/橡皮大小/缩放/形状，两模式互通）
+void MainWindow::setToolBarMode(bool diskMode) {
+    if (diskMode_ == diskMode)
+        return;
+    diskMode_ = diskMode;
+    settingsPanel_->setToolBarMode(diskMode_);  // 无信号同步选中态
+    // 收起全部弹窗面板与页面栏面板（避免跨模式残留；Popup 关闭链复位按钮态）
+    penPanel_->hide();
+    eraserPanel_->hide();
+    shapePanel_->hide();
+    tablePanel_->hide();
+    textPanel_->hide();
+    widgetPanel_->hide();
+    otherPanel_->hide();
+    morePanel_->hide();
+    settingsPanel_->hide();
+    pageRail_->setExpanded(false);
+    disk_->setExpanded(false);
+    toolBar_->setVisible(!diskMode_);
+    disk_->setVisible(diskMode_);
+    if (diskMode_) {
+        // 共享状态回灌圆盘（悬浮球图标/内环高亮/外环选中态）
+        disk_->setCurrentTool(view_->currentTool());
+        const bool highlighter = (penColor_ & 0xFF000000u) != 0;  // 荧光笔 alpha 位编码
+        disk_->setPenState(highlighter ? PenSettingPanel::PenKind::Highlighter
+                                       : PenSettingPanel::PenKind::Normal,
+                           penColor_ & 0x00FFFFFFu, penWidth_);
+        disk_->setEraserSize(view_->eraserSize());
+        disk_->setZoomPercent(zoomPercent_);
+    }
+}
+
 // 画布几何：窗口模式铺满中央区域（底部预留工具栏悬浮带 15px，与布局边距一致）；
 // 黑板模式视口取 16:9 最大内接矩形居中（参考 DisplayWindow Viewbox Stretch=Uniform）
 void MainWindow::updateBoardGeometry() {
     if (!central_ || !view_)
         return;
     const QRect area = central_->rect();
+    QRect boardRect;
     if (!boardMode_) {
-        view_->setGeometry(area.adjusted(0, 0, 0, -15));
-        return;
+        boardRect = area.adjusted(0, 0, 0, -15);
+    } else {
+        int w = area.width();
+        int h = qRound(w * 9.0 / 16.0);
+        if (h > area.height()) {
+            h = area.height();
+            w = qRound(h * 16.0 / 9.0);
+        }
+        boardRect = QRect(area.x() + (area.width() - w) / 2,
+                          area.y() + (area.height() - h) / 2, w, h);
     }
-    int w = area.width();
-    int h = qRound(w * 9.0 / 16.0);
-    if (h > area.height()) {
-        h = area.height();
-        w = qRound(h * 16.0 / 9.0);
-    }
-    view_->setGeometry(QRect(area.x() + (area.width() - w) / 2,
-                             area.y() + (area.height() - h) / 2, w, h));
+    view_->setGeometry(boardRect);
+    // 页面栏/圆盘活动范围同步（首次各贴画布左/右缘垂直居中，之后随范围钮回）
+    pageRail_->setBounds(boardRect);
+    disk_->setBounds(boardRect);
 }
 
 // 中央区域尺寸变化（窗口缩放 / 全屏切换）→ 重算画布几何

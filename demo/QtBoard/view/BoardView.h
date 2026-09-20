@@ -38,7 +38,7 @@ class QTimer;
 class BoardView : public QGraphicsView {
     Q_OBJECT
 public:
-    enum class Tool { Pen, Select, Lasso, Eraser, Pan, Shape, MindMap, Table, Text, Widget };
+    enum class Tool { Pen, Select, Lasso, Eraser, Pan, Shape, MindMap, Table, Text, Widget, Mouse };
 
     explicit BoardView(QWidget* parent = nullptr);
     ~BoardView() override;
@@ -48,10 +48,13 @@ public:
     void setPenColor(uint32_t color);   // COLORREF 语义 (0x00BBGGRR)
     void setPenWidth(int width);
     void setShapeKind(int kind) { shapeKind_ = kind; }   // 图形工具形状（GraphicKind 整数值）
+    int shapeKind() const { return shapeKind_; }         // 当前形状
     void setTableSize(int rows, int cols);               // 表格工具行列数（2~8）
     void setTextFontSize(int size);                      // 文字工具字号（面板选择，像素）
 void setTextColor(uint32_t color);                   // 文字工具颜色（面板选择，COLORREF 语义）
     void setWidgetKind(int kind);                        // 小工具类型 0~4（面板选择；参数在卡片内设置）
+    void setEraserSize(int size);                        // 橡皮擦高度（横向长方形，宽 = 高×kEraserAspect，档位见 BoardDisk）
+    int eraserSize() const { return eraserSize_; }
     void clearBoard();
 
     // 黑板背景：图片拉伸铺满视口（固定于视口，不随内容平移/缩放，参考 BoardSlideControl）；
@@ -71,6 +74,7 @@ void setTextColor(uint32_t color);                   // 文字工具颜色（面
     QString currentPageId() const { return currentPageId_; }
     void createPage();
     bool deletePage(const QString& pageId);
+    bool copyPage(const QString& pageId);  // 复制页面（内容一致、插入其后并选中新页）
     void selectPage(const QString& pageId);
 
     // 页面缩略图（页数面板用）：全部页数据 + 单页渲染为缩略图；
@@ -412,7 +416,9 @@ private:
     QStringList pageIds_;
     QString currentPageId_;
 
-    static constexpr int kEraserSize = 40;  // 橡皮擦边长（白色方块，与数据层擦除矩形一致）
+    int eraserSize_ = kEraserSize;   // 橡皮擦高度（横向长方形短边，与数据层擦除矩形一致；可调）
+    static constexpr int kEraserSize = 40;  // 橡皮擦默认高度
+    static constexpr qreal kEraserAspect = 1.5;  // 橡皮擦宽高比（横向长方形）
     static constexpr qreal kHitTolerance = 12;  // 选择工具命中容差（像素）
     static constexpr qreal kViewWidth = 1920;   // 初始视图基准 1080p
     static constexpr qreal kViewHeight = 1080;

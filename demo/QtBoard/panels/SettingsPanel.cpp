@@ -35,6 +35,8 @@ constexpr int kButtonH = 30;    // "浏览…" / 模式切换按钮
 constexpr int kMaxItems = 12;   // 最多展示背景数（含内置默认）
 // 显示模式分区总高：标题 + 间距 8 + 按钮行 + 间距 10
 constexpr int kModeSectionH = kSectionH + 8 + kButtonH + 10;
+// 工具栏模式分区总高（同显示模式一节）
+constexpr int kToolBarSectionH = kSectionH + 8 + kButtonH + 10;
 
 // 颜色常量（同 SlideManagerPanel）
 const QColor kMenuBackground(0x23, 0x27, 0x2A, 0xCC);  // #CC23272A
@@ -142,7 +144,8 @@ SettingsPanel::SettingsPanel(QWidget* parent) : QWidget(parent) {
     // 否则圆角外未绘制区域会被渲染成黑块
     setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
-    setFixedSize(kPanelW, kTitleHeight + kModeSectionH + kSectionH + 8 + kThumbH + 10 + kButtonH + 12);
+    setFixedSize(kPanelW, kTitleHeight + kModeSectionH + kToolBarSectionH +
+                        kSectionH + 8 + kThumbH + 10 + kButtonH + 12);
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, kTitleHeight, 12, 12);
@@ -188,6 +191,35 @@ SettingsPanel::SettingsPanel(QWidget* parent) : QWidget(parent) {
     modeRow->addWidget(boardModeButton_);
     modeRow->addWidget(windowModeButton_);
     root->addLayout(modeRow);
+    root->addSpacing(10);
+
+    // ---- 工具栏模式：底部工具栏 / 桌面圆盘（悬浮球） ----
+    root->addWidget(makeSectionLabel(QStringLiteral("工具栏模式")));
+    root->addSpacing(8);
+    toolBarGroup_ = new QButtonGroup(this);
+    toolBarGroup_->setExclusive(true);
+    barModeButton_ = new QPushButton(QStringLiteral("底部工具栏"), this);
+    diskModeButton_ = new QPushButton(QStringLiteral("桌面圆盘"), this);
+    toolBarGroup_->addButton(barModeButton_);
+    toolBarGroup_->addButton(diskModeButton_);
+    for (QPushButton* btn : {barModeButton_, diskModeButton_}) {
+        btn->setCheckable(true);
+        btn->setFixedHeight(kButtonH);
+        btn->setCursor(Qt::PointingHandCursor);
+        btn->setFocusPolicy(Qt::NoFocus);
+        btn->setStyleSheet(QString::fromLatin1(kModeButtonQss));
+    }
+    barModeButton_->setChecked(true);  // 默认底部工具栏模式（保持现状）
+    connect(barModeButton_, &QPushButton::clicked, this,
+            [this]() { emit toolBarModeChanged(false); });
+    connect(diskModeButton_, &QPushButton::clicked, this,
+            [this]() { emit toolBarModeChanged(true); });
+    auto* toolBarRow = new QHBoxLayout;
+    toolBarRow->setContentsMargins(0, 0, 0, 0);
+    toolBarRow->setSpacing(kGridSpacing);
+    toolBarRow->addWidget(barModeButton_);
+    toolBarRow->addWidget(diskModeButton_);
+    root->addLayout(toolBarRow);
     root->addSpacing(10);
 
     // ---- 黑板背景 ----
@@ -286,13 +318,18 @@ void SettingsPanel::selectKey(const QString& key) {
 void SettingsPanel::updatePanelSize() {
     const int rows = qMax(1, (thumbs_.size() + 1) / 2);
     const int gridH = rows * kThumbH + (rows - 1) * kGridSpacing;
-    setFixedSize(kPanelW,
-                 kTitleHeight + kModeSectionH + kSectionH + 8 + gridH + 10 + kButtonH + 12);
+    setFixedSize(kPanelW, kTitleHeight + kModeSectionH + kToolBarSectionH +
+                        kSectionH + 8 + gridH + 10 + kButtonH + 12);
 }
 
 // 更新显示模式选中态（由主窗口在模式切换 / 恢复时同步；不发出信号）
 void SettingsPanel::setDisplayMode(bool boardMode) {
     (boardMode ? boardModeButton_ : windowModeButton_)->setChecked(true);
+}
+
+// 更新工具栏模式选中态（true=桌面圆盘；不发出信号）
+void SettingsPanel::setToolBarMode(bool diskMode) {
+    (diskMode ? diskModeButton_ : barModeButton_)->setChecked(true);
 }
 
 // "从文件选择…"：任选图片作为自定义背景，加入网格并立即应用
