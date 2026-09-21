@@ -53,7 +53,7 @@ public:
     void setTextFontSize(int size);                      // 文字工具字号（面板选择，像素）
 void setTextColor(uint32_t color);                   // 文字工具颜色（面板选择，COLORREF 语义）
     void setWidgetKind(int kind);                        // 小工具类型 0~4（面板选择；参数在卡片内设置）
-    void setEraserSize(int size);                        // 橡皮擦高度（横向长方形，宽 = 高×kEraserAspect，档位见 BoardDisk）
+    void setEraserSize(int size);                        // 橡皮擦宽度（竖立长方形，高 = 宽×kEraserAspect，档位见 BoardDisk）
     int eraserSize() const { return eraserSize_; }
     void clearBoard();
 
@@ -61,6 +61,15 @@ void setTextColor(uint32_t color);                   // 文字工具颜色（面
     // 空 pixmap 回退墨绿纯色
     void setBoardBackground(const QPixmap& pixmap);
     QPixmap boardBackground() const { return boardBg_; }
+
+    // 透明背景（桌面批注模式）：true = 不绘制任何背景（笔迹/图形浮在真实桌面上，
+    // 依赖顶层窗口半透明）；false = 恢复正常背景（图或墨绿纯色）
+    void setBackgroundTransparent(bool transparent);
+
+    // 点击穿透模式（桌面批注"鼠标"工具联动）：true = 画布背景不画任何像素
+    //（alpha=0），分层窗口透明像素由系统命中测试直接穿透到下层窗口（可操作
+    // 桌面/其他应用）；false = 填充 alpha=1 近透明像素，保证画布可命中（可书写）
+    void setClickThrough(bool on);
 
     // 黑板原色（无背景图时的回退色；设置面板"原色"项取色用）
     static QColor boardDefaultColor() { return QColor(21, 42, 32); }
@@ -304,6 +313,8 @@ private:
     uint32_t penColor_ = 0x00FFFFFF;  // 默认白色
     int penWidth_ = 3;
     QPixmap boardBg_;                 // 黑板背景图（空 = 墨绿纯色）
+    bool transparentBg_ = false;      // 透明背景（桌面批注模式；见 setBackgroundTransparent）
+    bool clickThrough_ = false;       // 点击穿透模式（见 setClickThrough）
 
     int sessionId_ = 0;
     uint64_t strokeToken_ = 0;
@@ -416,9 +427,9 @@ private:
     QStringList pageIds_;
     QString currentPageId_;
 
-    int eraserSize_ = kEraserSize;   // 橡皮擦高度（横向长方形短边，与数据层擦除矩形一致；可调）
-    static constexpr int kEraserSize = 40;  // 橡皮擦默认高度
-    static constexpr qreal kEraserAspect = 1.5;  // 橡皮擦宽高比（横向长方形）
+    int eraserSize_ = kEraserSize;   // 橡皮擦宽度（竖立长方形短边，与数据层擦除矩形一致；可调）
+    static constexpr int kEraserSize = 40;  // 橡皮擦默认宽度
+    static constexpr qreal kEraserAspect = 1.5;  // 橡皮擦高宽比（竖立长方形：高 = 宽 × 1.5）
     static constexpr qreal kHitTolerance = 12;  // 选择工具命中容差（像素）
     static constexpr qreal kViewWidth = 1920;   // 初始视图基准 1080p
     static constexpr qreal kViewHeight = 1080;

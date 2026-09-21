@@ -20,8 +20,20 @@
 #include <QTimer>
 #include <QToolTip>
 #include <QWidget>
+#include <QWindow>
 
 #include <chrono>
+
+#ifdef Q_OS_WIN
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>  // 桌面批注点击穿透命中测试（WM_NCHITTEST / HTTRANSPARENT）
+#  include <windowsx.h>  // GET_X_LPARAM / GET_Y_LPARAM
+#endif
 
 #include "BoardDisk.h"
 #include "BoardToolBar.h"
@@ -90,9 +102,10 @@ bool strokeFromJson(const QJsonObject& obj, whiteboard::Stroke& stroke) {
     return true;
 }
 
-// 保存白板数据到文件（JSON；失败时 error 为原因）
+// 保存白板数据到文件（JSON；失败时 error 为原因；skipPageId 非空时跳过该页，
+// 供桌面批注模式排除临时批注页）
 bool saveBoardToFile(const QString& path, const std::vector<whiteboard::Page>& pages,
-                     const QString& currentPageId, QString* error) {
+                     const QString& currentPageId, const QString& skipPageId, QString* error) {
     QJsonObject root;
     root.insert(QStringLiteral("format"), QString::fromLatin1(kBoardFileFormat));
     root.insert(QStringLiteral("version"), kBoardFileVersion);
@@ -100,6 +113,8 @@ bool saveBoardToFile(const QString& path, const std::vector<whiteboard::Page>& p
 
     QJsonArray pageArr;
     for (const whiteboard::Page& page : pages) {
+        if (!skipPageId.isEmpty() && QString::fromStdString(page.pageId) == skipPageId)
+            continue;  // 跳过临时批注页（桌面批注模式）
         QJsonObject pageObj;
         pageObj.insert(QStringLiteral("pageId"), QString::fromStdString(page.pageId));
         QJsonArray strokeArr;
@@ -238,6 +253,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         disk_->setCurrentTool(tool);  // 悬浮球图标/内环高亮/外环焦点同步
         otherPanel_->setCurrentIndex(otherToolIndex(tool));  // 当前工具映射到"其他"面板条目
         updateOtherButtonState();
+        // 桌面批注模式："鼠标"工具 → 点击穿透操作电脑；其他批注工具恢复正常
+        if (desktopMode_)
+            setClickThrough(tool == BoardView::Tool::Mouse);
     });
     connect(toolBar_, &BoardToolBar::undoRequested, view_, &BoardView::undo);
     connect(toolBar_, &BoardToolBar::redoRequested, view_, &BoardView::redo);
@@ -319,6 +337,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
     // 更多外环"菜单"：复用更多面板（互动/保存/打开/设置/退出；锚点随模式切换）
     connect(disk_, &BoardDisk::menuRequested, this, &MainWindow::onMoreRequested);
+    // 桌面批注模式：底部工具栏"桌面"按钮进入；圆盘"更多"外环房子钮切换——
+    // 非桌面模式点按进入（返回桌面批注：圆盘模式工具栏不可见时的进入入口，
+    // 修复此前该钮在非桌面模式空操作的问题）；桌面模式点按退出（返回白板）
+    connect(toolBar_, &BoardToolBar::desktopRequested, this, [this]() { enterDesktopMode(); });
+    connect(disk_, &BoardDisk::backBoardRequested, this, [this]() {
+        if (desktopMode_)
+            exitDesktopMode();
+        else
+            enterDesktopMode();
+    });
 
     // ---------- 更多面板（互动 / 保存 / 打开 / 设置 / 退出） ----------
     connect(toolBar_, &BoardToolBar::moreRequested, this, &MainWindow::onMoreRequested);
@@ -863,9 +891,12 @@ void MainWindow::onSaveBoard() {
         path += QStringLiteral(".hrwb");
 
     const std::vector<whiteboard::Page> pages = view_->allPages();
-    const QString currentPageId = view_->currentPageId();
+    // 桌面批注模式：跳过临时批注页；当前页为临时页时记录进入前页面
+    const QString currentPageId = (view_->currentPageId() == desktopPageId_)
+                                      ? desktopOriginPageId_
+                                      : view_->currentPageId();
     QString error;
-    if (!saveBoardToFile(path, pages, currentPageId, &error)) {
+    if (!saveBoardToFile(path, pages, currentPageId, desktopPageId_, &error)) {
         QMessageBox::warning(this, QStringLiteral("保存失败"), error);
         return;
     }
@@ -876,6 +907,8 @@ void MainWindow::onSaveBoard() {
 // （数据线程 FIFO 保证先应用后切页），UI 由 onSynced 回调自动全量重建
 void MainWindow::onOpenBoard() {
     morePanel_->hide();
+    if (desktopMode_)
+        exitDesktopMode();  // 互斥：先退出桌面批注（临时页丢弃）再打开文件
     const QString path = QFileDialog::getOpenFileName(
         this, QStringLiteral("打开白板"), QDir::homePath(),
         QStringLiteral("HRTC 白板文件 (*.hrwb);;所有文件 (*)"));
@@ -942,6 +975,8 @@ void MainWindow::onBackgroundSelected(const QString& key, const QPixmap& pixmap)
 // 切换显示模式：黑板模式全屏（16:9 居中、无标题栏、盖系统任务栏）；
 // 窗口模式恢复为切换前的 16:9 窗口
 void MainWindow::setDisplayMode(bool boardMode) {
+    if (desktopMode_)
+        exitDesktopMode();  // 互斥：桌面批注模式先退出再应用显示模式
     if (boardMode_ == boardMode)
         return;
     boardMode_ = boardMode;
@@ -959,9 +994,17 @@ void MainWindow::setDisplayMode(bool boardMode) {
     updateBoardGeometry();
 }
 
-// 切换工具栏模式：底部工具栏 ↔ 桌面圆盘（悬浮球）；收起全部弹窗面板，
-// 圆盘收起并回灌共享状态（工具/笔参数/橡皮大小/缩放/形状，两模式互通）
+// 切换工具栏模式入口（设置面板）：桌面批注模式下先退出再应用
 void MainWindow::setToolBarMode(bool diskMode) {
+    if (desktopMode_)
+        exitDesktopMode();
+    applyToolBarMode(diskMode);
+}
+
+// 应用工具栏模式：底部工具栏 ↔ 桌面圆盘（悬浮球）；收起全部弹窗面板，
+// 圆盘收起并回灌共享状态（工具/笔参数/橡皮大小/缩放/形状，两模式互通）；
+// 进入/退出桌面批注模式直接调用（无桌面模式守卫）
+void MainWindow::applyToolBarMode(bool diskMode) {
     if (diskMode_ == diskMode)
         return;
     diskMode_ = diskMode;
@@ -999,7 +1042,9 @@ void MainWindow::updateBoardGeometry() {
         return;
     const QRect area = central_->rect();
     QRect boardRect;
-    if (!boardMode_) {
+    if (desktopMode_) {
+        boardRect = area;  // 桌面批注：画布铺满中央区域（无 16:9、无底部预留）
+    } else if (!boardMode_) {
         boardRect = area.adjusted(0, 0, 0, -15);
     } else {
         int w = area.width();
@@ -1014,7 +1059,12 @@ void MainWindow::updateBoardGeometry() {
     view_->setGeometry(boardRect);
     // 页面栏/圆盘活动范围同步（首次各贴画布左/右缘垂直居中，之后随范围钮回）
     pageRail_->setBounds(boardRect);
-    disk_->setBounds(boardRect);
+    if (desktopMode_) {
+        // 桌面批注：圆盘活动范围=中央区域全屏矩形（子部件可拖遍整个桌面）
+        disk_->setBounds(area);
+    } else {
+        disk_->setBounds(boardRect);
+    }
 }
 
 // 中央区域尺寸变化（窗口缩放 / 全屏切换）→ 重算画布几何
@@ -1029,6 +1079,8 @@ void MainWindow::changeEvent(QEvent* event) {
     QMainWindow::changeEvent(event);
     if (event->type() != QEvent::WindowStateChange)
         return;
+    if (desktopMode_)
+        return;  // 桌面批注模式：全屏切换由状态机控制，跳过黑板模式同步
     const bool full = isFullScreen();
     if (full == boardMode_)
         return;
@@ -1037,6 +1089,177 @@ void MainWindow::changeEvent(QEvent* event) {
     central_->setStyleSheet(boardMode_ ? QStringLiteral("#boardCentral { background: #000000; }")
                                        : QString());
     updateBoardGeometry();
+}
+
+// ---------- 桌面批注模式 ----------
+
+// 进入桌面批注模式：主窗口变全屏无边框置顶透明覆盖窗（透出真实桌面），
+// 自动新建空白临时批注页承载批注（退出即删），工具栏自动切圆盘
+//（子部件天然浮于画布之上，无顶层 z 序竞争，可拖遍整个桌面）
+void MainWindow::enterDesktopMode() {
+    if (desktopMode_)
+        return;
+    // 护栏：页面数达上限（临时批注页需占 1 页配额）
+    if (view_->pageIds().size() >= BoardView::kMaxPages) {
+        QToolTip::showText(QCursor::pos(),
+                           QStringLiteral("页面数已达上限（%1 页），无法进入桌面批注")
+                               .arg(BoardView::kMaxPages),
+                           this);
+        return;
+    }
+
+    // 收起全部弹窗面板与页面栏（桌面下只保留圆盘）
+    penPanel_->hide();
+    eraserPanel_->hide();
+    shapePanel_->hide();
+    tablePanel_->hide();
+    textPanel_->hide();
+    widgetPanel_->hide();
+    otherPanel_->hide();
+    morePanel_->hide();
+    settingsPanel_->hide();
+    pageRail_->setExpanded(false);
+    pageRail_->hide();
+
+    // 记录进入前状态（退出时恢复；须在切笔/建页之前记录）
+    preDesktopTool_ = view_->currentTool();
+    preDesktopDiskMode_ = diskMode_;
+    preDesktopBoardMode_ = boardMode_;
+    if (!boardMode_)
+        desktopSavedGeometry_ = saveGeometry();  // 窗口模式几何（黑板模式切回仍全屏）
+
+    // 切书写：提交进行中的文字编辑（避免随后的 reloadPage 丢弃未提交文本）
+    view_->setTool(BoardView::Tool::Pen);
+
+    // 进入标志须先置位：showFullScreen 触发的 WindowStateChange 靠它跳过黑板模式同步
+    desktopMode_ = true;
+
+    // 新建空白临时批注页（插入当前页后并自动切换；退出时删除）
+    desktopOriginPageId_ = view_->currentPageId();
+    view_->createPage();
+    desktopPageId_ = view_->currentPageId();
+    view_->setTool(BoardView::Tool::Pen);
+
+    // 主窗口透明化：半透明底 + 无边框 + 置顶 + 全屏 + QSS 透明
+    setAttribute(Qt::WA_TranslucentBackground, true);
+    setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    // 黑屏根因修复：setWindowFlags 在父子关系不变时不会销毁既有平台窗口，而窗口
+    // 表面的 alpha 格式仅在平台窗口创建时捕获——须显式销毁令其带 alpha 重建，
+    // 否则透明失效（渲染走 BitBlt，透明区变纯黑盖住整个桌面）
+    if (QWindow* wh = windowHandle()) {
+        wh->destroy();
+        QSurfaceFormat fmt = wh->requestedFormat();
+        fmt.setAlphaBufferSize(8);
+        wh->setFormat(fmt);
+    }
+    setStyleSheet(QStringLiteral(R"(
+        QMainWindow { background: transparent; }
+    )"));
+    // 中央区域自身 QSS 优先级高于窗口级：黑板模式下残留的纯黑底色须一并改透明
+    central_->setStyleSheet(QStringLiteral("#boardCentral { background: transparent; }"));
+    showFullScreen();
+    view_->setBackgroundTransparent(true);
+
+    // 工具栏切圆盘模式（共享状态回灌；底部工具栏随之隐藏）
+    applyToolBarMode(true);
+
+    // 圆盘保持中央区域子部件：全屏覆盖窗下与顶层窗等效（可拖遍整个桌面），
+    // 且子部件永远浮于主窗内容之上，不参与顶层 z 序竞争（避免被主窗遮挡/失点）
+    disk_->setVisible(true);
+    disk_->raise();
+    disk_->setExpanded(false);
+
+    updateBoardGeometry();
+}
+
+// 退出桌面批注模式（反向于进入）：删除临时批注页（批注丢弃）并切回进入前页面，
+// 圆盘回中央区域子部件，恢复窗口/背景/工具栏模式
+void MainWindow::exitDesktopMode() {
+    if (!desktopMode_)
+        return;
+
+    // 强制关闭点击穿透（恢复正常鼠标交互）
+    setClickThrough(false);
+
+    // 删除临时批注页；切回进入前页面（存在性守卫：联网等场景可能已被移除）
+    if (!desktopPageId_.isEmpty() && view_->pageIds().contains(desktopPageId_))
+        view_->deletePage(desktopPageId_);
+    if (!desktopOriginPageId_.isEmpty() &&
+        view_->pageIds().contains(desktopOriginPageId_))
+        view_->selectPage(desktopOriginPageId_);
+    desktopPageId_.clear();
+    desktopOriginPageId_.clear();
+
+    // 圆盘保持中央区域子部件（按进入前工具栏模式显示）；退出即收起为悬浮球
+    //（与进入对称：applyToolBarMode 在磁盘模式直回时不会代收）
+    disk_->setVisible(preDesktopDiskMode_);
+    disk_->setExpanded(false);
+    if (preDesktopDiskMode_)
+        disk_->raise();
+
+    // 恢复工具栏模式与页面栏
+    applyToolBarMode(preDesktopDiskMode_);
+    if (!preDesktopDiskMode_)
+        toolBar_->setVisible(true);  // 原底部工具栏模式：确保工具栏可见
+    pageRail_->show();
+
+    // 恢复显示模式标志（窗口操作期间 desktopMode_ 保持置位：changeEvent 全部抑制，
+    // 全屏/窗口切换只由本函数掌控，避免 setWindowFlags 隐藏窗口触发误同步）
+    boardMode_ = preDesktopBoardMode_;
+
+    // 去透明：恢复窗口标志与样式（黑板模式中央区域仍为纯黑）
+    setAttribute(Qt::WA_TranslucentBackground, false);
+    setWindowFlags(Qt::Window);
+    // 对称修复：销毁平台窗口令其以"无 alpha"表面重建，恢复常规不透明渲染路径
+    //（否则残留 alpha 表面在窗口模式下产生黑色未绘制区域）
+    if (QWindow* wh = windowHandle())
+        wh->destroy();
+    applyStyleSheet();
+    central_->setStyleSheet(boardMode_ ? QStringLiteral("#boardCentral { background: #000000; }")
+                                       : QString());
+    view_->setBackgroundTransparent(false);
+
+    // 恢复窗口显示模式与几何
+    if (boardMode_) {
+        showFullScreen();
+    } else {
+        showNormal();
+        restoreGeometry(desktopSavedGeometry_);
+    }
+
+    desktopMode_ = false;  // 窗口态已就绪：恢复 changeEvent 常规同步
+    updateBoardGeometry();
+    view_->setTool(preDesktopTool_);  // 恢复进入前工具
+}
+
+// 桌面批注点击穿透（"鼠标"工具）：只置标志，实际命中测试在 nativeEvent 处理——
+// 穿透开启时画布区域对鼠标透明（可操作电脑/其他应用），批注与圆盘仍渲染可见，
+// 圆盘区域保持可交互（点内环批注工具切回）；非 Windows 仅置标志（空实现）
+void MainWindow::setClickThrough(bool on) {
+    clickThrough_ = on;
+    // 画布背景填充策略随之切换：穿透时 alpha=0（系统级穿透鼠标），
+    // 批注时 alpha=1（保证画布可命中可书写）
+    view_->setClickThrough(on);
+}
+
+// 点击穿透命中测试：桌面模式 + 穿透开启时，除圆盘区域外一律返回 HTTRANSPARENT
+//（命中测试继续下发到下层窗口 → 桌面/其他应用收到鼠标）；圆盘区域走默认处理，
+// 保持"穿透时点圆盘仍可交互"（Qt 将事件路由到圆盘子部件）
+bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, long* result) {
+#ifdef Q_OS_WIN
+    if (desktopMode_ && clickThrough_ && eventType == "windows_generic_MSG") {
+        MSG* msg = static_cast<MSG*>(message);
+        if (msg->message == WM_NCHITTEST) {
+            const QPoint globalPos(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
+            const QPoint diskPos = disk_->mapFromGlobal(globalPos);
+            if (disk_->isVisible() && disk_->rect().contains(diskPos))
+                return false;  // 圆盘区域：默认命中（保持可交互）
+            *result = HTTRANSPARENT;
+            return true;
+        }
+    }
+#endif
+    return QMainWindow::nativeEvent(eventType, message, result);
 }
 
 // ---------- 互动白板 ----------

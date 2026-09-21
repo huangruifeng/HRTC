@@ -378,6 +378,22 @@ void drawColorWheel(QPainter& p, const QColor& c) {
     p.drawEllipse(QPointF(24.0, 24.0), 4.0, 4.0);
 }
 
+// 房子：屋顶（三角）+ 屋体 + 门（返回桌面/返回白板入口）
+void drawHouse(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    // 屋顶：两条斜边（尖顶）
+    QPainterPath roof;
+    roof.moveTo(9.5, 23.5);
+    roof.lineTo(24.0, 10.5);
+    roof.lineTo(38.5, 23.5);
+    p.drawPath(roof);
+    // 屋体（屋檐下矩形，底边与门底对齐）
+    p.drawRect(QRectF(14.0, 23.5, 20.0, 14.0));
+    // 门（底部中央小矩形）
+    p.drawRect(QRectF(21.0, 30.0, 6.0, 7.5));
+}
+
 }  // namespace
 
 QPixmap pixmap(Glyph glyph, bool active) {
@@ -473,6 +489,9 @@ QPixmap pixmap(Glyph glyph, bool active) {
             break;
         case Glyph::ColorWheel:
             drawColorWheel(p, color);
+            break;
+        case Glyph::House:
+            drawHouse(p, color);
             break;
     }
     return pm;

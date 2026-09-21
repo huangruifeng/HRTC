@@ -31,6 +31,9 @@ class QResizeEvent;
 // 笔设置与滑动清屏为工具栏按钮弹出的面板（Qt::Popup）；窗口锁定 16:9 缩放。
 // 显示模式：窗口模式（默认，可缩放 16:9 窗口）/ 黑板模式（全屏无标题栏、
 // 画布取 16:9 最大内接矩形居中）。
+// 桌面批注模式：全屏无边框置顶透明覆盖窗（透出真实桌面），工具栏自动切圆盘
+//（子部件，可在整个桌面拖动），空白临时批注页承载批注（退出即删）；
+// 点圆盘"鼠标"进入点击穿透（操作电脑），点任意批注工具恢复正常批注。
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -40,6 +43,8 @@ protected:
     void resizeEvent(QResizeEvent* event) override;  // 16:9 等比锁定
     void changeEvent(QEvent* event) override;        // 全屏状态被外部改变时同步模式
     bool eventFilter(QObject* watched, QEvent* event) override;  // 中央区域 resize → 画布几何
+    bool nativeEvent(const QByteArray& eventType, void* message,
+                     long* result) override;         // 点击穿透命中测试（WM_NCHITTEST）
 
 private:
     void onToolSelected(BoardView::Tool tool);
@@ -66,8 +71,12 @@ private:
     void onOpenBoard();                          // 从文件打开白板（弹出路径选择）
     void onBackgroundSelected(const QString& key, const QPixmap& pixmap);  // 应用黑板背景
     void setDisplayMode(bool boardMode);         // 切换显示模式（黑板=全屏 / 窗口）
-    void setToolBarMode(bool diskMode);          // 切换工具栏模式（桌面圆盘 / 底部工具栏）
+    void setToolBarMode(bool diskMode);          // 切换工具栏模式入口（桌面批注下先退出）
+    void applyToolBarMode(bool diskMode);        // 应用工具栏模式（内部实现，无守卫）
     void updateBoardGeometry();                  // 计算画布几何（黑板模式 16:9 居中）
+    void enterDesktopMode();                     // 进入桌面批注模式（透明覆盖窗 + 临时批注页）
+    void exitDesktopMode();                      // 退出桌面批注模式（删临时页 / 恢复窗口与工具栏）
+    void setClickThrough(bool on);               // 桌面批注点击穿透开关（"鼠标"工具；Windows）
     void updateSessionStatus(const QString& text);
     QRect anchorRect(BoardView::Tool tool) const;  // 弹窗面板锚点（按当前工具栏模式取工具栏/圆盘）
     QRect moreAnchorRect() const;                  // 更多/设置面板锚点
@@ -114,4 +123,14 @@ private:
     bool widgetButtonClosePending_ = false;
     bool aspectLockGuard_ = false;    // 16:9 锁定 resize 递归保护
     QString windowTitleBase_;
+
+    // ---------- 桌面批注模式（全屏透明覆盖窗 + 点击穿透） ----------
+    bool desktopMode_ = false;           // 桌面批注模式中（全屏置顶透明覆盖窗）
+    bool clickThrough_ = false;          // 点击穿透中（"鼠标"工具：可操作电脑）
+    bool preDesktopDiskMode_ = false;    // 进入前工具栏模式（退出恢复）
+    bool preDesktopBoardMode_ = false;   // 进入前显示模式（退出恢复）
+    BoardView::Tool preDesktopTool_ = BoardView::Tool::Pen;  // 进入前工具（退出恢复）
+    QString desktopPageId_;              // 桌面批注临时页 id（退出即删；不进保存文件）
+    QString desktopOriginPageId_;        // 进入前所在页 id（退出切回）
+    QByteArray desktopSavedGeometry_;    // 进入前窗口几何（窗口模式；黑板模式不存）
 };

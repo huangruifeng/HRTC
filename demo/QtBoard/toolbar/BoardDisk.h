@@ -16,10 +16,10 @@ class QPixmap;
 //（画笔/荧光棒/擦除/选择/鼠标/撤销/重做/更多，45° 均布）+ 外环随内环焦点的
 // 动态设置钮。外环内容（焦点 = 最后点击的内环类目，撤销/重做无外环）：
 //   画笔/荧光棒 → 3 档粗细 + 11 色板 + 色轮（弹 ColorPickerPanel 取色）
-//   擦除        → 5 档橡皮大小（长方形擦除区）+ 清屏（弹滑动清屏面板）
+//   擦除        → 5 档橡皮大小（竖立长方形擦除区）+ 清屏（弹滑动清屏面板）
 //   选择        → 选择框（Tool::Select）/ 套索（Tool::Lasso）
 //   鼠标        → 缩小 / 100% / 放大
-//   更多        → 文字 / 图形（弹形状面板）/ 表格 / 小工具 / 菜单（弹 MorePanel）
+//   更多        → 文字 / 图形（弹形状面板）/ 表格 / 小工具 / 菜单（弹 MorePanel）/ 桌面切换
 // 全部自绘（圆形深色半透背景，同工具栏 rgba(35,39,42,204) 风格）。
 class BoardDisk : public QWidget {
     Q_OBJECT
@@ -60,6 +60,7 @@ signals:
     void tableToolRequested();          // 更多外环：表格（MainWindow 弹表格设置面板）
     void widgetToolRequested();         // 更多外环：小工具（MainWindow 弹小工具面板）
     void menuRequested();               // 更多外环：菜单（MainWindow 弹 MorePanel）
+    void backBoardRequested();          // 更多外环：房子钮（桌面批注模式内=返回白板/退出；白板内=返回桌面/进入）
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -82,6 +83,7 @@ private:
             Shape,       // 图形（四种形状合一入口：弹 ShapePickerPanel）
             Widget,      // 小工具（弹 WidgetSetupPanel）
             Text, Table, Menu,
+            BackBoard,   // 桌面批注切换（房子图标：桌面模式内=返回白板，白板内=返回桌面）
         };
         QRect rect;
         Type type;

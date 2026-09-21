@@ -37,7 +37,7 @@ const char* const kPalette[] = {
     "#306C00", "#66D552", "#FF1ED0", "#4FA0B7", "#8B7E6E",
 };
 
-// 橡皮大小档位（高度短边，擦除区宽 = 高 × 1.5）
+// 橡皮大小档位（宽度短边，擦除区高 = 宽 × 1.5）
 constexpr int kEraserSteps = 5;
 constexpr int kEraserSizes[kEraserSteps] = { 12, 24, 40, 60, 90 };
 
@@ -292,6 +292,7 @@ void BoardDisk::rebuildRing() {
             addItem(RingButton::Type::Table, 0, tool_ == BoardView::Tool::Table);
             addItem(RingButton::Type::Widget, 0, tool_ == BoardView::Tool::Widget);
             addItem(RingButton::Type::Menu, 0, false);
+            addItem(RingButton::Type::BackBoard, 0, false);  // 桌面批注切换（桌面内=返回白板，白板内=返回桌面）
             break;
         case InnerButton::Type::Undo:
         case InnerButton::Type::Redo:
@@ -411,12 +412,12 @@ void BoardDisk::paintEvent(QPaintEvent* event) {
                 drawIcon(p, BoardIcons::pixmap(BoardIcons::Glyph::ColorWheel, false), inner);
                 break;
             case RingButton::Type::EraserSize: {
-                // 大小示意：横向长方形（宽高比 1.5 同擦除区域；高度按档位 7/10/13/16/19px）
+                // 大小示意：竖立长方形（高宽比 1.5 同擦除区域；宽度按档位 7/10/13/16/19px）
                 static const qreal sides[] = { 7.0, 10.0, 13.0, 16.0, 19.0 };
                 p.setPen(QPen(button.checked ? kActiveColor : QColor(0xE0, 0xE0, 0xE0), 1.4));
                 p.setBrush(QColor(255, 255, 255, 230));
                 const qreal s = sides[button.id];
-                p.drawRect(QRectF(center.x() - s * 0.75, center.y() - s / 2.0, s * 1.5, s));
+                p.drawRect(QRectF(center.x() - s / 2.0, center.y() - s * 0.75, s, s * 1.5));
                 break;
             }
             case RingButton::Type::Clear:
@@ -460,6 +461,9 @@ void BoardDisk::paintEvent(QPaintEvent* event) {
                 break;
             case RingButton::Type::Menu:
                 drawIcon(p, BoardIcons::pixmap(BoardIcons::Glyph::More, false), inner);
+                break;
+            case RingButton::Type::BackBoard:
+                drawIcon(p, BoardIcons::pixmap(BoardIcons::Glyph::House, false), inner);
                 break;
         }
     }
@@ -684,6 +688,9 @@ void BoardDisk::ringClicked(const RingButton& button) {
             return;
         case RingButton::Type::Menu:
             emit menuRequested();
+            return;
+        case RingButton::Type::BackBoard:
+            emit backBoardRequested();
             return;
     }
     rebuildRing();

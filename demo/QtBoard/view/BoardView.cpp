@@ -1758,8 +1758,42 @@ void BoardView::setBoardBackground(const QPixmap& pixmap) {
     viewport()->update();
 }
 
+// 透明背景（桌面批注模式）：不画任何背景像素，透出顶层半透明窗下的真实桌面；
+// 场景背景刷同步改为无刷，视口属性随开关切换（依赖顶层窗口 WA_TranslucentBackground）
+void BoardView::setBackgroundTransparent(bool transparent) {
+    if (transparentBg_ == transparent)
+        return;
+    transparentBg_ = transparent;
+    scene_.setBackgroundBrush(transparent ? QBrush(Qt::NoBrush) : QBrush(kBoardBackground));
+    viewport()->setAttribute(Qt::WA_TranslucentBackground, transparent);
+    viewport()->setAutoFillBackground(!transparent);
+    viewport()->update();
+}
+
+// 点击穿透模式：切换画布背景的填充策略（详见头文件说明）；只需重绘视口——
+// drawBackground 按新策略填充像素，分层窗口的系统命中测试随之改变
+void BoardView::setClickThrough(bool on) {
+    if (clickThrough_ == on)
+        return;
+    clickThrough_ = on;
+    viewport()->update();
+}
+
 // 背景固定于视口：重置变换后按视口矩形拉伸绘制，不随内容平移/缩放
 void BoardView::drawBackground(QPainter* painter, const QRectF& rect) {
+    if (transparentBg_) {
+        if (clickThrough_) {
+            // 点击穿透模式（"鼠标"工具）：完全不画——像素保持 alpha=0，分层窗口
+            // 的透明像素由系统命中测试直接穿透到下层窗口（桌面/其他应用收到
+            // 鼠标）；笔迹与圆盘为不透明像素，仍可命中（点圆盘可切回批注工具）
+            return;
+        }
+        // 批注模式（默认）：填充 alpha=1 的近透明像素替代"完全不画"——视觉上
+        // 完全不可见，但保证像素 alpha 非 0：WS_EX_LAYERED 分层窗口在 alpha=0
+        // 区域会被鼠标命中直接穿透，画布将收不到鼠标事件（无法书写批注）
+        painter->fillRect(rect, QColor(0, 0, 0, 1));
+        return;
+    }
     if (boardBg_.isNull()) {
         painter->fillRect(rect, kBoardBackground);
         return;
@@ -3280,11 +3314,12 @@ void BoardView::ensureEraserItem() {
 
 void BoardView::updateEraserPreview(const QPointF& center) {
     ensureEraserItem();
-    // 横向长方形（宽 = 高 × 宽高比），中心跟随鼠标
-    const qreal w = eraserSize_ * kEraserAspect;
+    // 竖立长方形（高 = 宽 × 高宽比），中心跟随鼠标
+    const qreal w = eraserSize_;
+    const qreal h = eraserSize_ * kEraserAspect;
     eraserPreview_->setRect(QRectF(center.x() - w / 2.0,
-                                   center.y() - eraserSize_ / 2.0,
-                                   w, eraserSize_));
+                                   center.y() - h / 2.0,
+                                   w, h));
     eraserPreview_->setVisible(true);
 }
 
@@ -3293,10 +3328,11 @@ whiteboard::Point BoardView::toBoardPoint(const QPointF& p) const {
 }
 
 whiteboard::Rect BoardView::eraserRectAt(const QPointF& center) const {
-    const int w = qRound(eraserSize_ * kEraserAspect);
+    const int w = eraserSize_;
+    const int h = qRound(eraserSize_ * kEraserAspect);
     const int x = qRound(center.x() - w / 2.0);
-    const int y = qRound(center.y() - eraserSize_ / 2.0);
-    return whiteboard::Rect(x, y, w, eraserSize_);
+    const int y = qRound(center.y() - h / 2.0);
+    return whiteboard::Rect(x, y, w, h);
 }
 
 QPointF BoardView::clampToScene(const QPointF& p) const {

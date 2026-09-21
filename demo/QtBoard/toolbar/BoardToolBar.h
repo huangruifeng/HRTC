@@ -68,6 +68,7 @@ signals:
     void zoomResetRequested();
     void moreRequested();       // 更多按钮：弹出/收起更多面板（互动/保存/打开/设置/退出）
     void otherRequested();      // "其他"按钮：弹出/收起其他工具面板（图形/导图/表格/文字/小工具）
+    void desktopRequested();    // "桌面"按钮：进入桌面透明批注模式（房子图标）
 
 private:
     BoardToolButton* createButton(const QString& text, const QPixmap& normal,
@@ -78,5 +79,6 @@ private:
     QHash<int, BoardToolButton*> toolButtons_;  // key = static_cast<int>(BoardView::Tool)
     BoardToolButton* zoomResetButton_ = nullptr;
     BoardToolButton* moreButton_ = nullptr;
+    BoardToolButton* desktopButton_ = nullptr;  // 右侧"桌面"入口（房子图标，返回桌面批注）
     BoardToolButton* otherButton_ = nullptr;  // 左侧工具组"其他"入口（非 checkable，仿 moreButton_）
 };

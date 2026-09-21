@@ -168,12 +168,20 @@ BoardToolBar::BoardToolBar(QWidget* parent) : QWidget(parent) {
     connect(zoomResetButton_, &QToolButton::clicked, this, &BoardToolBar::zoomResetRequested);
     connect(zoomInButton, &QToolButton::clicked, this, &BoardToolBar::zoomInRequested);
 
-    // ---------- 右侧：更多入口 ----------
+    // ---------- 右侧：桌面 / 更多入口 ----------
     // 更多：面板风格应用级入口（保存/打开/设置），置于工具栏最右端；
     // 页面组（添加页/翻页/页码）已拆出至左侧 PageRail 页面栏
     auto* rightLayout = new QHBoxLayout;
     rightLayout->setContentsMargins(0, 0, 0, 0);
     rightLayout->setSpacing(6);
+
+    // 桌面：进入桌面透明批注模式（房子图标，非 checkable；MainWindow 处理）
+    desktopButton_ = createButton(
+        QStringLiteral("桌面"),
+        BoardIcons::pixmap(BoardIcons::Glyph::House, false),
+        BoardIcons::pixmap(BoardIcons::Glyph::House, true), false);
+    rightLayout->addWidget(desktopButton_);
+    connect(desktopButton_, &QToolButton::clicked, this, &BoardToolBar::desktopRequested);
 
     moreButton_ = createButton(
         QStringLiteral("更多"),
