@@ -35,6 +35,7 @@
 #  include <windowsx.h>  // GET_X_LPARAM / GET_Y_LPARAM
 #endif
 
+#include "AiPanel.h"
 #include "BoardDisk.h"
 #include "BoardToolBar.h"
 #include "BoardUtil.h"
@@ -226,6 +227,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     textPanel_ = new TextSetupPanel(this);
     widgetPanel_ = new WidgetSetupPanel(this);
     otherPanel_ = new OtherToolsPanel(this);
+    aiPanel_ = new ai::AiPanel(*view_, view_->data(), this);
 
     // 中央区域：画布手动几何（黑板模式 16:9 居中，窗口模式铺满）+ 工具栏悬浮底部居中（距底 15px）
     // + 圆盘/页面栏悬浮（几何自管理：圆盘右缘中部、页面栏左缘贴边）
@@ -361,6 +363,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         QTimer::singleShot(0, this, &MainWindow::onSettingsRequested);
     });
     connect(morePanel_, &MorePanel::exitRequested, this, &MainWindow::onExitApp);
+    connect(morePanel_, &MorePanel::aiRequested, this, [this]() {
+        morePanel_->hide();  // 先收起更多面板，再打开/收起 AI 对话面板
+        if (aiPanel_->isVisible())
+            aiPanel_->hide();
+        else
+            aiPanel_->ShowAndFocus();
+    });
     connect(morePanel_, &MorePanel::closed, this, [this]() {
         toolBar_->setMoreButtonActive(false);
         // Popup 因点击更多按钮/圆盘菜单钮而在按下阶段自动关闭：置标志，
@@ -1065,6 +1074,8 @@ void MainWindow::updateBoardGeometry() {
     } else {
         disk_->setBounds(boardRect);
     }
+    if (aiPanel_)
+        aiPanel_->AlignBottomRight();  // AI 面板贴主窗口右下角
 }
 
 // 中央区域尺寸变化（窗口缩放 / 全屏切换）→ 重算画布几何

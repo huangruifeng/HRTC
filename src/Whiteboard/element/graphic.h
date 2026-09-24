@@ -15,6 +15,8 @@ enum class GraphicKind {
     Triangle,
     Pentagon,
     Star,
+    Polygon,  // 任意多边形（顶点由调用方给定，AI 轨迹美化用）
+    Line,     // 直线（两点开放子路径，AI 轨迹美化用）
 };
 
 // 子路径：一条折线（closed = 描边时首尾闭合）

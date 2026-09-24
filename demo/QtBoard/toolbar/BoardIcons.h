@@ -35,6 +35,7 @@ enum class Glyph {
     Triangle,    // 三角形：单三角线框
     ColorWheel,  // 色轮：多色相环（自定义取色入口；固定彩色绘制）
     House,       // 房子：屋顶 + 屋体 + 门（返回桌面/返回白板入口）
+    Sparkle,     // AI 助手：四角星 + 右上小星（闪烁线稿）
 };
 
 // 返回 48x48 逻辑尺寸（2x 采样）的图标：active=true 为激活橙色，false 为默认灰色

@@ -394,6 +394,27 @@ void drawHouse(QPainter& p, const QColor& c) {
     p.drawRect(QRectF(21.0, 30.0, 6.0, 7.5));
 }
 
+// AI 助手：四角星 + 右上小星（闪烁线稿；凹边用二次贝塞尔拉向中心）
+void drawSparkle(QPainter& p, const QColor& c) {
+    p.setPen(iconPen(c));
+    p.setBrush(Qt::NoBrush);
+    QPainterPath star;
+    star.moveTo(21.0, 12.0);              // 上顶点
+    star.quadTo(23.5, 24.5, 35.0, 27.0);  // 上 → 右（凹向中心）
+    star.quadTo(23.5, 29.5, 21.0, 42.0);  // 右 → 下
+    star.quadTo(18.5, 29.5, 7.0, 27.0);   // 下 → 左
+    star.quadTo(18.5, 24.5, 21.0, 12.0);  // 左 → 上
+    p.drawPath(star);
+
+    QPainterPath small;
+    small.moveTo(37.0, 5.0);
+    small.quadTo(38.0, 11.0, 43.0, 12.0);
+    small.quadTo(38.0, 13.0, 37.0, 19.0);
+    small.quadTo(36.0, 13.0, 31.0, 12.0);
+    small.quadTo(36.0, 11.0, 37.0, 5.0);
+    p.drawPath(small);
+}
+
 }  // namespace
 
 QPixmap pixmap(Glyph glyph, bool active) {
@@ -492,6 +513,9 @@ QPixmap pixmap(Glyph glyph, bool active) {
             break;
         case Glyph::House:
             drawHouse(p, color);
+            break;
+        case Glyph::Sparkle:
+            drawSparkle(p, color);
             break;
     }
     return pm;

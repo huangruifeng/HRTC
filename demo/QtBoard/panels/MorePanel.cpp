@@ -35,7 +35,7 @@ MorePanel::MorePanel(QWidget* parent) : QWidget(parent) {
     // 否则圆角外未绘制区域会被渲染成黑块
     setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
     setAttribute(Qt::WA_TranslucentBackground);
-    setFixedSize(kPanelW, kTitleHeight + 5 * kButtonH + 4 * kButtonSpacing + 12);
+    setFixedSize(kPanelW, kTitleHeight + 6 * kButtonH + 5 * kButtonSpacing + 12);
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(12, kTitleHeight, 12, 12);
@@ -53,12 +53,14 @@ MorePanel::MorePanel(QWidget* parent) : QWidget(parent) {
         root->addWidget(slot);
     };
     addItem(interactButton_, QStringLiteral("互动白板"), BoardIcons::Glyph::Interact);
+    addItem(aiButton_, QStringLiteral("AI 助手"), BoardIcons::Glyph::Sparkle);
     addItem(saveButton_, QStringLiteral("保存白板"), BoardIcons::Glyph::Save);
     addItem(openButton_, QStringLiteral("打开白板"), BoardIcons::Glyph::Open);
     addItem(settingsButton_, QStringLiteral("设置"), BoardIcons::Glyph::Settings);
     addItem(exitButton_, QStringLiteral("退出程序"), BoardIcons::Glyph::Exit);
 
     connect(interactButton_, &QPushButton::clicked, this, &MorePanel::interactRequested);
+    connect(aiButton_, &QPushButton::clicked, this, &MorePanel::aiRequested);
     connect(saveButton_, &QPushButton::clicked, this, &MorePanel::saveRequested);
     connect(openButton_, &QPushButton::clicked, this, &MorePanel::openRequested);
     connect(settingsButton_, &QPushButton::clicked, this, &MorePanel::settingsRequested);

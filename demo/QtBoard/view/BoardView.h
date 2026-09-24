@@ -47,6 +47,8 @@ public:
     Tool currentTool() const { return tool_; }
     void setPenColor(uint32_t color);   // COLORREF 语义 (0x00BBGGRR)
     void setPenWidth(int width);
+    uint32_t penColor() const { return penColor_; }  // 当前笔色（AI 助手默认笔色）
+    int penWidth() const { return penWidth_; }       // 当前笔宽（AI 助手默认笔宽）
     void setShapeKind(int kind) { shapeKind_ = kind; }   // 图形工具形状（GraphicKind 整数值）
     int shapeKind() const { return shapeKind_; }         // 当前形状
     void setTableSize(int rows, int cols);               // 表格工具行列数（2~8）
@@ -101,6 +103,13 @@ void setTextColor(uint32_t color);                   // 文字工具颜色（面
 
     // 数据层引用（互动会话层注册命令产出回调/应用远程命令用）
     QtBoardData& data() { return data_; }
+
+    // 选中元素 id 列表（AI 助手工具调用/美化用；跳过无 id 的临时图元）
+    QStringList selectedElementIds() const;
+    // 当前可视区在 board（scene）坐标下的矩形（AI 工具定位用）
+    QRectF visibleBoardRect() const;
+    // 文字元素字形包围盒（与渲染端同源字体计算；AI 工具/程序化创建文字用）
+    static whiteboard::Rect textGlyphBounds(const whiteboard::TextElement& t);
 
 signals:
     void pagesChanged();

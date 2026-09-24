@@ -34,3 +34,7 @@
 build/
 
 .cu-verify
+
+# AI 助手依赖：OpenSSL 1.1.1w（源码树 + 运行库产物；构建脚本 3rd/openssl/build_openssl.ps1）
+3rd/openssl/openssl-1.1.1w/
+3rd/openssl/dist

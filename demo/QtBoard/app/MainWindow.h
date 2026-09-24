@@ -23,6 +23,10 @@ class TextSetupPanel;
 class WidgetSetupPanel;
 class OtherToolsPanel;
 
+namespace ai {
+class AiPanel;
+}
+
 class QEvent;
 class QResizeEvent;
 
@@ -97,6 +101,7 @@ private:
     TextSetupPanel* textPanel_ = nullptr;
     WidgetSetupPanel* widgetPanel_ = nullptr;
     OtherToolsPanel* otherPanel_ = nullptr;
+    ai::AiPanel* aiPanel_ = nullptr;  // AI 助手对话面板（右下角悬浮，默认隐藏）
     std::unique_ptr<WhiteboardSession> session_;
 
     QWidget* central_ = nullptr;      // 中央区域（画布 + 悬浮工具栏）

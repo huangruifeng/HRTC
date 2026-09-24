@@ -498,6 +498,74 @@ void QtBoardData::EraserEnd(const whiteboard::Rect& rc, int sessionId) {
     });
 }
 
+// ---------- 程序化区域擦除（AI 助手等） ----------
+
+void QtBoardData::EraseRegion(const std::vector<whiteboard::Rect>& rects) {
+    thread_->BeginInvoke([this, rects]() {
+        if (rects.empty())
+            return;
+
+        // 操作前快照：先克隆，确认有命中再入历史栈（无命中不产生空撤销步/不广播）
+        auto before = CurrentPage()->Clone();
+
+        // 局部累积（不复用 eraserRemoved_/eraserAdded_，避免与进行中的交互擦除会话互相污染）
+        std::set<std::string> removedSet;
+        std::vector<std::string> removedIds;
+        std::vector<std::shared_ptr<whiteboard::Element>> addedElements;
+        std::vector<whiteboard::EraserPlacement> addedPlacements;
+        for (const auto& rc : rects) {
+            if (rc.width <= 0 || rc.height <= 0)
+                continue;
+            whiteboard::EraserResult r = CurrentPage()->Eraser(rc);
+            for (const auto& id : r.removedIds) {
+                if (removedSet.insert(id).second)
+                    removedIds.push_back(id);
+            }
+            for (size_t i = 0; i < r.addedElements.size(); ++i) {
+                addedElements.push_back(r.addedElements[i]);
+                addedPlacements.push_back(i < r.addedPlacements.size()
+                                              ? r.addedPlacements[i]
+                                              : whiteboard::EraserPlacement());
+            }
+        }
+
+        // 碎片可能在后续矩形擦除中又被删掉，以 removed 为准过滤（同 FlushEraser 语义）
+        std::vector<std::shared_ptr<whiteboard::Element>> finalAdded;
+        std::vector<whiteboard::EraserPlacement> finalPlacements;
+        for (size_t i = 0; i < addedElements.size(); ++i) {
+            if (removedSet.count(addedElements[i]->id) != 0)
+                continue;
+            finalAdded.push_back(addedElements[i]);
+            finalPlacements.push_back(addedPlacements[i]);
+        }
+
+        if (removedIds.empty() && finalAdded.empty())
+            return;  // 无命中：页面未变，不入历史、不广播、不回调
+
+        // 入历史栈（等价 PushSnapshot；批内已由 BeginBatch 记录过则跳过）
+        if (!batchSuppress_) {
+            auto& h = histories_[CurrentPage()->pageId];
+            h.undo.push_back(std::move(before));
+            while (h.undo.size() > kHistoryLimit)
+                h.undo.pop_front();
+            h.redo.clear();
+        }
+
+        auto cmd = std::make_shared<whiteboard::EraserEnd>();
+        cmd->pageId = CurrentPage()->pageId;
+        cmd->sessionId = "ai-" + std::to_string(++programmaticEraseSeq_);
+        cmd->removedIds = removedIds;
+        cmd->addedElements = finalAdded;
+        cmd->addedPlacements = finalPlacements;
+        if (onOutgoingCmd_)
+            onOutgoingCmd_(std::move(cmd));
+
+        if (onElementsChanged_)
+            onElementsChanged_(std::move(removedIds), std::move(finalAdded),
+                               std::move(finalPlacements));
+    });
+}
+
 // 收集橡皮增量：过滤已被后续擦除删除的碎片后回调；clearAccum 为 true 时清空累积。
 // 返回过滤结果（供 EraserEnd 命令负载；addedPlacements 与 addedElements 对齐）。
 QtBoardData::EraserDelta QtBoardData::FlushEraser(bool clearAccum) {

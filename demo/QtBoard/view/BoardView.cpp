@@ -3327,6 +3327,31 @@ whiteboard::Point BoardView::toBoardPoint(const QPointF& p) const {
     return whiteboard::Point(qRound(p.x()), qRound(p.y()));
 }
 
+// 选中元素 id 列表（AI 助手工具调用/美化用；跳过无 id 的临时图元）
+QStringList BoardView::selectedElementIds() const {
+    QStringList ids;
+    for (QGraphicsPathItem* item : selectedItems_) {
+        if (!item)
+            continue;
+        const QString id = item->data(0).toString();
+        if (!id.isEmpty() && !ids.contains(id))
+            ids.append(id);
+    }
+    return ids;
+}
+
+// 当前可视区在 board（scene）坐标下的矩形（AI 工具定位用）
+QRectF BoardView::visibleBoardRect() const {
+    return mapToScene(viewport()->rect()).boundingRect();
+}
+
+// 文字元素字形包围盒（与渲染端同源字体计算；AI 工具/程序化创建文字用）
+whiteboard::Rect BoardView::textGlyphBounds(const whiteboard::TextElement& t) {
+    const QRectF br = textPath(t).boundingRect();
+    return whiteboard::Rect(qRound(br.x()), qRound(br.y()),
+                            qMax(1, qRound(br.width())), qMax(1, qRound(br.height())));
+}
+
 whiteboard::Rect BoardView::eraserRectAt(const QPointF& center) const {
     const int w = eraserSize_;
     const int h = qRound(eraserSize_ * kEraserAspect);

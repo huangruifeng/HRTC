@@ -69,6 +69,10 @@ public:
     void EraserBegin(const whiteboard::Rect& rc, int sessionId);
     void EraserMove(const whiteboard::Rect& rc, int sessionId);
     void EraserEnd(const whiteboard::Rect& rc, int sessionId);
+    // 程序化区域擦除（AI 助手等）：对每个矩形做一次橡皮裁剪（与真实橡皮同语义：
+    // 部分命中切割笔画、完全命中整条删除，仅作用于 Stroke）；增量回调 + 广播一条
+    // EraserEnd（远端无 Begin 也能直接应用差异）。无任何命中时不产生历史快照/广播。
+    void EraseRegion(const std::vector<whiteboard::Rect>& rects);
     void Clear();
     // 全量导出当前页（初始化/页面切换全量重建用）
     void GetPage(whiteboard::Page& page);
@@ -247,6 +251,7 @@ private:
     std::vector<whiteboard::EraserPlacement> eraserAddedPlacements_;  // 与 eraserAdded_ 对齐
     std::map<std::string, PageHistory> histories_;  // pageId -> 历史栈
     bool batchSuppress_ = false;  // 批内抑制 PushSnapshot（仅数据线程访问）
+    int  programmaticEraseSeq_ = 0;  // 程序化擦除会话序号（EraseRegion 广播用，仅数据线程访问）
 
     static constexpr size_t kHistoryLimit = 20;
 };
